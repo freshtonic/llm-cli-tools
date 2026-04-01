@@ -304,16 +304,37 @@ fn format_debug_body(body: &str, pretty: bool) -> String {
     if !pretty {
         return body.to_string();
     }
-    // Try to parse as JSON and pretty-print. For GraphQL requests,
-    // also unescape the query field so it's readable.
     if let Ok(mut parsed) = serde_json::from_str::<Value>(body) {
-        // If there's a "query" field with a string value, it's a GraphQL query.
-        // Print it as a raw string block instead of an escaped JSON string.
-        if let Some(query) = parsed.get("query").and_then(|q| q.as_str()) {
-            let query_block = format!("\n--- GraphQL Query ---\n{}\n---------------------", query);
-            parsed["query"] = Value::String(query_block);
+        // Extract GraphQL query to print separately, unescaped.
+        let query = parsed
+            .get("query")
+            .and_then(|q| q.as_str())
+            .map(|q| q.to_string());
+
+        if query.is_some() {
+            parsed
+                .as_object_mut()
+                .unwrap()
+                .remove("query");
         }
-        serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| body.to_string())
+
+        let mut out = String::new();
+
+        if let Some(q) = &query {
+            out.push_str("--- GraphQL Query ---\n");
+            out.push_str(q.trim());
+            out.push_str("\n---------------------\n");
+        }
+
+        // Print remaining fields (variables, etc.) if any exist.
+        if let Some(obj) = parsed.as_object() {
+            if !obj.is_empty() {
+                out.push_str(&serde_json::to_string_pretty(&parsed)
+                    .unwrap_or_else(|_| body.to_string()));
+            }
+        }
+
+        if out.is_empty() { body.to_string() } else { out }
     } else {
         body.to_string()
     }
