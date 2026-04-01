@@ -16,7 +16,10 @@ enum Action {
     /// Show help/usage (no subcommand given, or --help).
     Help,
     /// Dispatch to a subcommand binary with the given remaining args.
-    Dispatch { subcommand: String, args: Vec<String> },
+    Dispatch {
+        subcommand: String,
+        args: Vec<String>,
+    },
 }
 
 /// Parse raw CLI arguments into an action.
