@@ -1,6 +1,8 @@
 //! Output formatting for JSON (default) and human-readable modes.
 
-use crate::api::{HistoryResult, SearchResult, SendResult, SummaryResult};
+use std::io::Write;
+
+use crate::api::{HistoryResult, Reaction, SearchResult, SendResult, SummaryResult};
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
@@ -22,12 +24,21 @@ impl CliError {
     }
 
     pub fn render(&self) {
+        self.render_to(&mut std::io::stdout(), &mut std::io::stderr());
+    }
+
+    /// Render this error to the given writers.
+    ///
+    /// In JSON mode (the default), the structured error goes to `stdout_w` so
+    /// that agents capturing stdout receive the error envelope. In `--human`
+    /// mode, plain-text diagnostics go to `stderr_w`.
+    pub fn render_to(&self, stdout_w: &mut dyn Write, stderr_w: &mut dyn Write) {
         if self.human {
-            eprintln!("Error: {}", self.detail.message);
-            eprintln!("Suggestion: {}", self.detail.suggestion);
+            let _ = writeln!(stderr_w, "Error: {}", self.detail.message);
+            let _ = writeln!(stderr_w, "Suggestion: {}", self.detail.suggestion);
         } else {
             let json = format_error(&self.detail);
-            eprintln!("{json}");
+            let _ = writeln!(stdout_w, "{json}");
         }
     }
 }
@@ -59,6 +70,28 @@ pub fn format_send_human(result: &SendResult) -> String {
     )
 }
 
+/// Format an annotation string for reply count and reactions.
+///
+/// Returns e.g. ` [3 replies, 7 reactions]` or empty string if both are None/zero.
+fn format_message_annotation(reply_count: Option<u64>, reactions: Option<&[Reaction]>) -> String {
+    let replies = reply_count.filter(|&c| c > 0);
+    let total_reactions: u64 = reactions
+        .map(|r| r.iter().map(|rx| rx.count).sum())
+        .unwrap_or(0);
+    let reaction_part = if total_reactions > 0 {
+        Some(total_reactions)
+    } else {
+        None
+    };
+
+    match (replies, reaction_part) {
+        (Some(r), Some(rx)) => format!(" [{r} replies, {rx} reactions]"),
+        (Some(r), None) => format!(" [{r} replies]"),
+        (None, Some(rx)) => format!(" [{rx} reactions]"),
+        (None, None) => String::new(),
+    }
+}
+
 pub fn format_history_human(result: &HistoryResult) -> String {
     let mut out = String::new();
     if result.messages.is_empty() {
@@ -69,7 +102,11 @@ pub fn format_history_human(result: &HistoryResult) -> String {
                 out.push('\n');
             }
             let user = msg.user.as_deref().unwrap_or("unknown");
-            out.push_str(&format!("### {} `{}`\n\n{}\n", user, msg.ts, msg.text));
+            let annotation = format_message_annotation(
+                msg.reply_count,
+                msg.reactions.as_deref(),
+            );
+            out.push_str(&format!("### {} `{}`{annotation}\n\n{}\n", user, msg.ts, msg.text));
         }
     }
     if let Some(ref msg) = result.message {
@@ -90,8 +127,12 @@ pub fn format_search_human(result: &SearchResult) -> String {
             .as_ref()
             .map(|c| c.name.as_str())
             .unwrap_or("DM");
+        let annotation = format_message_annotation(
+            msg.reply_count,
+            msg.reactions.as_deref(),
+        );
         out.push_str(&format!(
-            "### {} in #{} `{}`\n\n",
+            "### {} in #{} `{}`{annotation}\n\n",
             user, channel_name, msg.ts
         ));
         out.push_str(&format!("{}\n", msg.text));
@@ -144,6 +185,9 @@ mod tests {
                 text: "hello".to_string(),
                 thread_ts: None,
                 channel: None,
+                reply_count: None,
+                reactions: None,
+                edited: None,
             },
         };
         let output = format_send_human(&result);
@@ -172,6 +216,9 @@ mod tests {
                     text: "hey".to_string(),
                     thread_ts: None,
                     channel: None,
+                    reply_count: None,
+                    reactions: None,
+                    edited: None,
                 },
                 Message {
                     ts: "2.0".to_string(),
@@ -179,6 +226,9 @@ mod tests {
                     text: "hi".to_string(),
                     thread_ts: None,
                     channel: None,
+                    reply_count: None,
+                    reactions: None,
+                    edited: None,
                 },
             ],
             has_more: false,
@@ -198,6 +248,142 @@ mod tests {
         };
         assert!(format_summary_human(&result).contains("The team discussed plans."));
         assert!(format_summary_human(&result).contains("## Channel Summary"));
+    }
+
+    #[test]
+    fn render_json_error_writes_to_stdout_writer() {
+        let err = CliError {
+            detail: ErrorDetail {
+                code: "TEST_ERROR",
+                message: "something broke".to_string(),
+                suggestion: "try again".to_string(),
+            },
+            human: false,
+        };
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        err.render_to(&mut stdout_buf, &mut stderr_buf);
+        let stdout_str = String::from_utf8(stdout_buf).unwrap();
+        let stderr_str = String::from_utf8(stderr_buf).unwrap();
+        assert!(stderr_str.is_empty(), "JSON errors should not go to stderr");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout_str).unwrap();
+        assert_eq!(parsed["success"], false);
+        assert_eq!(parsed["error"]["code"], "TEST_ERROR");
+    }
+
+    #[test]
+    fn render_human_error_writes_to_stderr_writer() {
+        let err = CliError {
+            detail: ErrorDetail {
+                code: "TEST_ERROR",
+                message: "something broke".to_string(),
+                suggestion: "try again".to_string(),
+            },
+            human: true,
+        };
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        err.render_to(&mut stdout_buf, &mut stderr_buf);
+        let stdout_str = String::from_utf8(stdout_buf).unwrap();
+        let stderr_str = String::from_utf8(stderr_buf).unwrap();
+        assert!(stdout_str.is_empty(), "Human errors should not go to stdout");
+        assert!(stderr_str.contains("something broke"));
+        assert!(stderr_str.contains("try again"));
+    }
+
+    #[test]
+    fn format_message_annotation_both_present() {
+        let reactions = vec![
+            crate::api::Reaction { name: "thumbsup".to_string(), count: 5 },
+            crate::api::Reaction { name: "heart".to_string(), count: 2 },
+        ];
+        let result = format_message_annotation(Some(3), Some(&reactions));
+        assert!(result.contains("3 replies"), "Expected reply count");
+        assert!(result.contains("7 reactions"), "Expected total reaction count");
+    }
+
+    #[test]
+    fn format_message_annotation_replies_only() {
+        let result = format_message_annotation(Some(5), None);
+        assert!(result.contains("5 replies"), "Expected reply count");
+        assert!(!result.contains("reactions"), "Should not mention reactions");
+    }
+
+    #[test]
+    fn format_message_annotation_reactions_only() {
+        let reactions = vec![
+            crate::api::Reaction { name: "thumbsup".to_string(), count: 3 },
+        ];
+        let result = format_message_annotation(None, Some(&reactions));
+        assert!(!result.contains("replies"), "Should not mention replies");
+        assert!(result.contains("3 reactions"), "Expected reaction count");
+    }
+
+    #[test]
+    fn format_message_annotation_both_none() {
+        let result = format_message_annotation(None, None);
+        assert!(result.is_empty(), "Expected empty string when both None");
+    }
+
+    #[test]
+    fn format_message_annotation_zero_reply_count() {
+        let result = format_message_annotation(Some(0), None);
+        assert!(result.is_empty(), "Expected empty string for zero replies");
+    }
+
+    #[test]
+    fn format_message_annotation_empty_reactions() {
+        let result = format_message_annotation(None, Some(&[]));
+        assert!(result.is_empty(), "Expected empty string for empty reactions");
+    }
+
+    #[test]
+    fn format_history_human_with_annotations() {
+        let reactions = vec![
+            crate::api::Reaction { name: "thumbsup".to_string(), count: 2 },
+        ];
+        let result = HistoryResult {
+            messages: vec![Message {
+                ts: "1.0".to_string(),
+                user: Some("alice".to_string()),
+                text: "hey".to_string(),
+                thread_ts: None,
+                channel: None,
+                reply_count: Some(3),
+                reactions: Some(reactions),
+                edited: None,
+            }],
+            has_more: false,
+            message: None,
+        };
+        let output = format_history_human(&result);
+        assert!(output.contains("3 replies"), "Expected reply annotation");
+        assert!(output.contains("2 reactions"), "Expected reaction annotation");
+    }
+
+    #[test]
+    fn format_search_human_with_annotations() {
+        let reactions = vec![
+            crate::api::Reaction { name: "wave".to_string(), count: 4 },
+        ];
+        let result = SearchResult {
+            messages: vec![crate::api::SearchMessage {
+                ts: "1.0".to_string(),
+                user: Some("bob".to_string()),
+                text: "mention".to_string(),
+                channel: Some(crate::api::SearchChannel {
+                    id: "C1".to_string(),
+                    name: "general".to_string(),
+                }),
+                permalink: None,
+                reply_count: Some(2),
+                reactions: Some(reactions),
+            }],
+            total: 1,
+        };
+        let output = format_search_human(&result);
+        assert!(output.contains("2 replies"), "Expected reply annotation");
+        assert!(output.contains("4 reactions"), "Expected reaction annotation");
     }
 
     #[test]

@@ -13,7 +13,7 @@ use std::io::{IsTerminal, Write};
 /// Write output to stdout, piping through a pager if appropriate.
 pub fn print_with_pager(output: &str, human: bool, debug: bool) {
     if should_page(output, human, debug) {
-        if let Err(_) = pipe_to_pager(output) {
+        if pipe_to_pager(output).is_err() {
             // Fallback: print directly if pager fails.
             print!("{output}");
         }
@@ -49,10 +49,10 @@ fn should_page(output: &str, human: bool, debug: bool) -> bool {
 
 fn terminal_height() -> Option<usize> {
     // Use the LINES env var if set, otherwise try ioctl.
-    if let Ok(lines) = std::env::var("LINES") {
-        if let Ok(n) = lines.parse() {
-            return Some(n);
-        }
+    if let Ok(lines) = std::env::var("LINES")
+        && let Ok(n) = lines.parse()
+    {
+        return Some(n);
     }
 
     #[cfg(unix)]

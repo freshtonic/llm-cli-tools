@@ -17,6 +17,14 @@ pub struct Topic {
     pub posts_count: u64,
     #[serde(default)]
     pub views: u64,
+    #[serde(default)]
+    pub like_count: u64,
+    #[serde(default)]
+    pub reply_count: u64,
+    #[serde(default)]
+    pub last_posted_at: Option<String>,
+    #[serde(default)]
+    pub tags: Option<Vec<String>>,
 }
 
 /// A Discourse post (the first post in a topic, or a reply).
@@ -32,6 +40,12 @@ pub struct Post {
     pub cooked: String,
     pub post_number: u64,
     pub created_at: String,
+    #[serde(default)]
+    pub like_count: u64,
+    #[serde(default)]
+    pub reply_count: u64,
+    #[serde(default)]
+    pub score: Option<f64>,
 }
 
 /// Response from fetching a topic — includes both topic metadata and posts.
@@ -307,6 +321,10 @@ pub fn parse_topic_response(body: &Value) -> Result<TopicResponse, String> {
         "category_id": body.get("category_id"),
         "posts_count": body.get("posts_count").and_then(|v| v.as_u64()).unwrap_or(0),
         "views": body.get("views").and_then(|v| v.as_u64()).unwrap_or(0),
+        "like_count": body.get("like_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        "reply_count": body.get("reply_count").and_then(|v| v.as_u64()).unwrap_or(0),
+        "last_posted_at": body.get("last_posted_at"),
+        "tags": body.get("tags"),
     }))
     .map_err(|e| format!("Failed to parse topic: {e}"))?;
 
@@ -346,12 +364,11 @@ pub fn parse_category_id(body: &Value, name: &str) -> Result<u64, String> {
 
     let lower_name = name.to_lowercase();
     for cat in categories {
-        if let Some(cat_name) = cat.get("name").and_then(|n| n.as_str()) {
-            if cat_name.to_lowercase() == lower_name {
-                if let Some(id) = cat.get("id").and_then(|id| id.as_u64()) {
-                    return Ok(id);
-                }
-            }
+        if let Some(cat_name) = cat.get("name").and_then(|n| n.as_str())
+            && cat_name.to_lowercase() == lower_name
+            && let Some(id) = cat.get("id").and_then(|id| id.as_u64())
+        {
+            return Ok(id);
         }
     }
 
@@ -528,5 +545,88 @@ mod tests {
     fn parse_category_id_missing_categories() {
         let body = serde_json::json!({});
         assert!(parse_category_id(&body, "General").is_err());
+    }
+
+    // ---- New field tests ----
+
+    #[test]
+    fn parse_topic_with_new_fields() {
+        let body = serde_json::json!({
+            "id": 42,
+            "title": "My Topic",
+            "slug": "my-topic",
+            "category_id": 5,
+            "posts_count": 3,
+            "views": 100,
+            "like_count": 15,
+            "reply_count": 7,
+            "last_posted_at": "2026-04-01T12:00:00Z",
+            "tags": ["rust", "cli"],
+            "post_stream": { "posts": [] }
+        });
+        let result = parse_topic_response(&body).unwrap();
+        assert_eq!(result.topic.like_count, 15);
+        assert_eq!(result.topic.reply_count, 7);
+        assert_eq!(
+            result.topic.last_posted_at.as_deref(),
+            Some("2026-04-01T12:00:00Z")
+        );
+        assert_eq!(
+            result.topic.tags.as_deref(),
+            Some(["rust".to_string(), "cli".to_string()].as_slice())
+        );
+    }
+
+    #[test]
+    fn parse_topic_without_new_fields_defaults() {
+        let body = serde_json::json!({
+            "id": 42,
+            "title": "My Topic",
+            "slug": "my-topic",
+            "category_id": null,
+            "posts_count": 0,
+            "views": 0,
+            "post_stream": { "posts": [] }
+        });
+        let result = parse_topic_response(&body).unwrap();
+        assert_eq!(result.topic.like_count, 0);
+        assert_eq!(result.topic.reply_count, 0);
+        assert!(result.topic.last_posted_at.is_none());
+        assert!(result.topic.tags.is_none());
+    }
+
+    #[test]
+    fn parse_post_with_new_fields() {
+        let json = serde_json::json!({
+            "id": 101,
+            "topic_id": 42,
+            "username": "james",
+            "cooked": "<p>Hello</p>",
+            "post_number": 1,
+            "created_at": "2026-01-01T00:00:00Z",
+            "like_count": 5,
+            "reply_count": 2,
+            "score": 12.5
+        });
+        let post: Post = serde_json::from_value(json).unwrap();
+        assert_eq!(post.like_count, 5);
+        assert_eq!(post.reply_count, 2);
+        assert_eq!(post.score, Some(12.5));
+    }
+
+    #[test]
+    fn parse_post_without_new_fields_defaults() {
+        let json = serde_json::json!({
+            "id": 101,
+            "topic_id": 42,
+            "username": "james",
+            "cooked": "<p>Hello</p>",
+            "post_number": 1,
+            "created_at": "2026-01-01T00:00:00Z"
+        });
+        let post: Post = serde_json::from_value(json).unwrap();
+        assert_eq!(post.like_count, 0);
+        assert_eq!(post.reply_count, 0);
+        assert!(post.score.is_none());
     }
 }

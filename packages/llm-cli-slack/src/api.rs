@@ -17,6 +17,12 @@ pub struct Message {
     pub thread_ts: Option<String>,
     #[serde(default)]
     pub channel: Option<String>,
+    #[serde(default)]
+    pub reply_count: Option<u64>,
+    #[serde(default)]
+    pub reactions: Option<Vec<Reaction>>,
+    #[serde(default)]
+    pub edited: Option<Edited>,
 }
 
 /// Result from sending a message.
@@ -54,12 +60,29 @@ pub struct SearchMessage {
     pub channel: Option<SearchChannel>,
     #[serde(default)]
     pub permalink: Option<String>,
+    #[serde(default)]
+    pub reply_count: Option<u64>,
+    #[serde(default)]
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SearchChannel {
     pub id: String,
     pub name: String,
+}
+
+/// A reaction on a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Reaction {
+    pub name: String,
+    pub count: u64,
+}
+
+/// Edit metadata on a message.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Edited {
+    pub ts: String,
 }
 
 /// Result from requesting a channel summary.
@@ -558,5 +581,70 @@ mod tests {
         assert_eq!(urlencoded::encode("hello world"), "hello+world");
         assert_eq!(urlencoded::encode("<@U123>"), "%3C%40U123%3E");
         assert_eq!(urlencoded::encode("plain"), "plain");
+    }
+
+    // ---- New field tests ----
+
+    #[test]
+    fn parse_message_with_new_fields() {
+        let json = serde_json::json!({
+            "ts": "1.0",
+            "user": "U1",
+            "text": "hello",
+            "reply_count": 3,
+            "reactions": [
+                { "name": "thumbsup", "count": 5 },
+                { "name": "heart", "count": 2 }
+            ],
+            "edited": { "ts": "2.0" }
+        });
+        let msg: Message = serde_json::from_value(json).unwrap();
+        assert_eq!(msg.reply_count, Some(3));
+        let reactions = msg.reactions.unwrap();
+        assert_eq!(reactions.len(), 2);
+        assert_eq!(reactions[0].name, "thumbsup");
+        assert_eq!(reactions[0].count, 5);
+        assert_eq!(reactions[1].name, "heart");
+        assert_eq!(reactions[1].count, 2);
+        let edited = msg.edited.unwrap();
+        assert_eq!(edited.ts, "2.0");
+    }
+
+    #[test]
+    fn parse_message_without_new_fields() {
+        let json = serde_json::json!({
+            "ts": "1.0",
+            "text": "hello"
+        });
+        let msg: Message = serde_json::from_value(json).unwrap();
+        assert!(msg.reply_count.is_none());
+        assert!(msg.reactions.is_none());
+        assert!(msg.edited.is_none());
+    }
+
+    #[test]
+    fn parse_search_message_with_new_fields() {
+        let json = serde_json::json!({
+            "ts": "1.0",
+            "text": "hello",
+            "reply_count": 7,
+            "reactions": [{ "name": "wave", "count": 1 }]
+        });
+        let msg: SearchMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(msg.reply_count, Some(7));
+        let reactions = msg.reactions.unwrap();
+        assert_eq!(reactions.len(), 1);
+        assert_eq!(reactions[0].name, "wave");
+    }
+
+    #[test]
+    fn parse_search_message_without_new_fields() {
+        let json = serde_json::json!({
+            "ts": "1.0",
+            "text": "hello"
+        });
+        let msg: SearchMessage = serde_json::from_value(json).unwrap();
+        assert!(msg.reply_count.is_none());
+        assert!(msg.reactions.is_none());
     }
 }

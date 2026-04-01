@@ -17,12 +17,49 @@ pub struct Issue {
     pub priority: Option<f64>,
     pub description: Option<String>,
     pub url: String,
+    #[serde(default)]
+    pub assignee: Option<Assignee>,
+    #[serde(default)]
+    pub team: Option<IssueTeam>,
+    #[serde(default)]
+    pub labels: Option<LabelsConnection>,
+    #[serde(default, alias = "createdAt")]
+    pub created_at: Option<String>,
+    #[serde(default, alias = "updatedAt")]
+    pub updated_at: Option<String>,
 }
 
 /// The state of an issue (e.g., "In Progress", "Done").
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IssueState {
     pub name: String,
+}
+
+/// The assignee of an issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Assignee {
+    pub name: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// The team an issue belongs to.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueTeam {
+    pub key: String,
+    pub name: String,
+}
+
+/// A label on an issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IssueLabel {
+    pub name: String,
+}
+
+/// A connection of labels on an issue.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LabelsConnection {
+    pub nodes: Vec<IssueLabel>,
 }
 
 /// Result of listing issues, including truncation info.
@@ -62,6 +99,11 @@ pub fn build_list_query(limit: u32, filters: &IssueFilters) -> GraphqlRequest {
       priority
       description
       url
+      assignee { name email }
+      team { key name }
+      labels { nodes { name } }
+      createdAt
+      updatedAt
     }
     pageInfo {
       hasNextPage
@@ -161,6 +203,11 @@ pub fn build_get_query(identifier: &str) -> GraphqlRequest {
     priority
     description
     url
+    assignee { name email }
+    team { key name }
+    labels { nodes { name } }
+    createdAt
+    updatedAt
   }
 }"#
     .to_string();
@@ -202,6 +249,11 @@ pub fn build_create_mutation(
       priority
       description
       url
+      assignee { name email }
+      team { key name }
+      labels { nodes { name } }
+      createdAt
+      updatedAt
     }
   }
 }"#
@@ -262,6 +314,11 @@ pub fn build_close_mutation(issue_id: &str, done_state_id: &str) -> GraphqlReque
       priority
       description
       url
+      assignee { name email }
+      team { key name }
+      labels { nodes { name } }
+      createdAt
+      updatedAt
     }
   }
 }"#
@@ -371,12 +428,12 @@ fn format_debug_body(body: &str, pretty: bool) -> String {
         }
 
         // Print remaining fields (variables, etc.) if any exist.
-        if let Some(obj) = parsed.as_object() {
-            if !obj.is_empty() {
-                out.push_str(
-                    &serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| body.to_string()),
-                );
-            }
+        if let Some(obj) = parsed.as_object()
+            && !obj.is_empty()
+        {
+            out.push_str(
+                &serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| body.to_string()),
+            );
         }
 
         if out.is_empty() {
@@ -772,5 +829,139 @@ mod tests {
         assert!(req.query.contains("states"));
         let vars = req.variables.unwrap();
         assert_eq!(vars["id"], "PROJ-1");
+    }
+
+    // ---- New field tests ----
+
+    #[test]
+    fn parse_issue_with_all_new_fields() {
+        let body = serde_json::json!({
+            "data": {
+                "issue": {
+                    "id": "uuid-1",
+                    "identifier": "PROJ-1",
+                    "title": "Full issue",
+                    "state": { "name": "In Progress" },
+                    "priority": 2.0,
+                    "description": "Desc",
+                    "url": "https://linear.app/proj/issue/PROJ-1",
+                    "assignee": { "name": "Alice", "email": "alice@example.com" },
+                    "team": { "key": "ENG", "name": "Engineering" },
+                    "labels": { "nodes": [{ "name": "bug" }, { "name": "urgent" }] },
+                    "createdAt": "2026-01-01T00:00:00Z",
+                    "updatedAt": "2026-01-02T00:00:00Z"
+                }
+            }
+        });
+        let issue = parse_get_response(&body).unwrap();
+        let assignee = issue.assignee.unwrap();
+        assert_eq!(assignee.name, "Alice");
+        assert_eq!(assignee.email.as_deref(), Some("alice@example.com"));
+        let team = issue.team.unwrap();
+        assert_eq!(team.key, "ENG");
+        assert_eq!(team.name, "Engineering");
+        let labels = issue.labels.unwrap();
+        assert_eq!(labels.nodes.len(), 2);
+        assert_eq!(labels.nodes[0].name, "bug");
+        assert_eq!(labels.nodes[1].name, "urgent");
+        assert_eq!(issue.created_at.as_deref(), Some("2026-01-01T00:00:00Z"));
+        assert_eq!(issue.updated_at.as_deref(), Some("2026-01-02T00:00:00Z"));
+    }
+
+    #[test]
+    fn parse_issue_missing_new_fields_defaults_to_none() {
+        let body = serde_json::json!({
+            "data": {
+                "issue": {
+                    "id": "uuid-1",
+                    "identifier": "PROJ-1",
+                    "title": "Minimal issue",
+                    "state": null,
+                    "priority": null,
+                    "description": null,
+                    "url": "https://linear.app/proj/issue/PROJ-1"
+                }
+            }
+        });
+        let issue = parse_get_response(&body).unwrap();
+        assert!(issue.assignee.is_none());
+        assert!(issue.team.is_none());
+        assert!(issue.labels.is_none());
+        assert!(issue.created_at.is_none());
+        assert!(issue.updated_at.is_none());
+    }
+
+    #[test]
+    fn issue_created_at_serializes_as_snake_case() {
+        let issue = Issue {
+            id: "uuid-1".to_string(),
+            identifier: "PROJ-1".to_string(),
+            title: "Test".to_string(),
+            state: None,
+            priority: None,
+            description: None,
+            url: "https://example.com".to_string(),
+            assignee: None,
+            team: None,
+            labels: None,
+            created_at: Some("2026-01-01T00:00:00Z".to_string()),
+            updated_at: Some("2026-01-02T00:00:00Z".to_string()),
+        };
+        let json = serde_json::to_value(&issue).unwrap();
+        // Serializes as snake_case (the Rust field name)
+        assert_eq!(json["created_at"], "2026-01-01T00:00:00Z");
+        assert_eq!(json["updated_at"], "2026-01-02T00:00:00Z");
+        // But also deserializes from camelCase (the API alias)
+        let camel_json = serde_json::json!({
+            "id": "uuid-1",
+            "identifier": "PROJ-1",
+            "title": "Test",
+            "url": "https://example.com",
+            "createdAt": "2026-03-01T00:00:00Z",
+            "updatedAt": "2026-03-02T00:00:00Z"
+        });
+        let from_camel: Issue = serde_json::from_value(camel_json).unwrap();
+        assert_eq!(from_camel.created_at.as_deref(), Some("2026-03-01T00:00:00Z"));
+        assert_eq!(from_camel.updated_at.as_deref(), Some("2026-03-02T00:00:00Z"));
+    }
+
+    #[test]
+    fn build_list_query_includes_new_fields() {
+        let req = build_list_query(10, &IssueFilters::default());
+        assert!(req.query.contains("assignee { name email }"));
+        assert!(req.query.contains("team { key name }"));
+        assert!(req.query.contains("labels { nodes { name } }"));
+        assert!(req.query.contains("createdAt"));
+        assert!(req.query.contains("updatedAt"));
+    }
+
+    #[test]
+    fn build_get_query_includes_new_fields() {
+        let req = build_get_query("PROJ-1");
+        assert!(req.query.contains("assignee { name email }"));
+        assert!(req.query.contains("team { key name }"));
+        assert!(req.query.contains("labels { nodes { name } }"));
+        assert!(req.query.contains("createdAt"));
+        assert!(req.query.contains("updatedAt"));
+    }
+
+    #[test]
+    fn build_create_mutation_includes_new_fields() {
+        let req = build_create_mutation("Test", "team-uuid", None, None);
+        assert!(req.query.contains("assignee { name email }"));
+        assert!(req.query.contains("team { key name }"));
+        assert!(req.query.contains("labels { nodes { name } }"));
+        assert!(req.query.contains("createdAt"));
+        assert!(req.query.contains("updatedAt"));
+    }
+
+    #[test]
+    fn build_close_mutation_includes_new_fields() {
+        let req = build_close_mutation("issue-uuid", "done-state-uuid");
+        assert!(req.query.contains("assignee { name email }"));
+        assert!(req.query.contains("team { key name }"));
+        assert!(req.query.contains("labels { nodes { name } }"));
+        assert!(req.query.contains("createdAt"));
+        assert!(req.query.contains("updatedAt"));
     }
 }

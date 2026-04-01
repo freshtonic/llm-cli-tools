@@ -4,6 +4,8 @@
 //! Error responses use `{"success": false, "error": {"code": "...", "message": "...", "suggestion": "..."}}`.
 //! With `--human`, errors go to stderr as plain text, data to stdout as formatted text.
 
+use std::io::Write;
+
 use crate::api::{CreatePostResponse, LatestPostsResponse, Post, TopicResponse};
 use serde::Serialize;
 
@@ -29,12 +31,21 @@ impl CliError {
 
     /// Render this error to the appropriate output stream.
     pub fn render(&self) {
+        self.render_to(&mut std::io::stdout(), &mut std::io::stderr());
+    }
+
+    /// Render this error to the given writers.
+    ///
+    /// In JSON mode (the default), the structured error goes to `stdout_w` so
+    /// that agents capturing stdout receive the error envelope. In `--human`
+    /// mode, plain-text diagnostics go to `stderr_w`.
+    pub fn render_to(&self, stdout_w: &mut dyn Write, stderr_w: &mut dyn Write) {
         if self.human {
-            eprintln!("Error: {}", self.detail.message);
-            eprintln!("Suggestion: {}", self.detail.suggestion);
+            let _ = writeln!(stderr_w, "Error: {}", self.detail.message);
+            let _ = writeln!(stderr_w, "Suggestion: {}", self.detail.suggestion);
         } else {
             let json = format_error(&self.detail);
-            eprintln!("{json}");
+            let _ = writeln!(stdout_w, "{json}");
         }
     }
 }
@@ -63,10 +74,10 @@ pub fn format_error(detail: &ErrorDetail) -> String {
 
 /// Get the best available content from a post — prefer raw (markdown) over cooked (HTML).
 fn post_content(post: &Post) -> String {
-    if let Some(ref raw) = post.raw {
-        if !raw.is_empty() {
-            return raw.clone();
-        }
+    if let Some(ref raw) = post.raw
+        && !raw.is_empty()
+    {
+        return raw.clone();
     }
     strip_html(&post.cooked)
 }
@@ -99,6 +110,20 @@ pub fn format_topic_human(response: &TopicResponse) -> String {
     out.push_str(&format!("- **Category:** {category}\n"));
     out.push_str(&format!("- **Posts:** {}\n", t.posts_count));
     out.push_str(&format!("- **Views:** {}\n", t.views));
+    if t.like_count > 0 {
+        out.push_str(&format!("- **Likes:** {}\n", t.like_count));
+    }
+    if t.reply_count > 0 {
+        out.push_str(&format!("- **Replies:** {}\n", t.reply_count));
+    }
+    if let Some(ref tags) = t.tags
+        && !tags.is_empty()
+    {
+        out.push_str(&format!("- **Tags:** {}\n", tags.join(", ")));
+    }
+    if let Some(ref last_posted_at) = t.last_posted_at {
+        out.push_str(&format!("- **Last posted:** {last_posted_at}\n"));
+    }
 
     for post in &response.posts {
         out.push_str(&format!(
@@ -115,14 +140,18 @@ pub fn format_topic_human(response: &TopicResponse) -> String {
 /// Format a created post as markdown.
 pub fn format_post_human(response: &CreatePostResponse) -> String {
     let p = &response.post;
-    format!(
-        "## Post #{} in topic #{}\n\n- **By:** {} ({})\n\n{}\n",
-        p.id,
-        p.topic_id,
-        p.username,
-        p.created_at,
-        post_content(p),
-    )
+    let mut out = format!(
+        "## Post #{} in topic #{}\n\n- **By:** {} ({})\n",
+        p.id, p.topic_id, p.username, p.created_at,
+    );
+    if p.like_count > 0 {
+        out.push_str(&format!("- **Likes:** {}\n", p.like_count));
+    }
+    if p.reply_count > 0 {
+        out.push_str(&format!("- **Replies:** {}\n", p.reply_count));
+    }
+    out.push_str(&format!("\n{}\n", post_content(p)));
+    out
 }
 
 /// Format the latest posts list as markdown.
@@ -143,15 +172,18 @@ pub fn format_latest_posts_human(response: &LatestPostsResponse) -> String {
 
 fn format_post_summary(post: &Post) -> String {
     let title = post.topic_title.as_deref().unwrap_or("(untitled)");
-    format!(
-        "## #{} — {}\n\n- **By:** {} in topic #{}\n- **Date:** {}\n\n{}\n",
-        post.id,
-        title,
-        post.username,
-        post.topic_id,
-        post.created_at,
-        post_content(post),
-    )
+    let mut out = format!(
+        "## #{} — {}\n\n- **By:** {} in topic #{}\n- **Date:** {}\n",
+        post.id, title, post.username, post.topic_id, post.created_at,
+    );
+    if post.like_count > 0 {
+        out.push_str(&format!("- **Likes:** {}\n", post.like_count));
+    }
+    if post.reply_count > 0 {
+        out.push_str(&format!("- **Replies:** {}\n", post.reply_count));
+    }
+    out.push_str(&format!("\n{}\n", post_content(post)));
+    out
 }
 
 #[cfg(test)]
@@ -172,6 +204,9 @@ mod tests {
                     cooked: "<p>Hello</p>".to_string(),
                     post_number: 1,
                     created_at: "2026-04-01".to_string(),
+                    like_count: 0,
+                    reply_count: 0,
+                    score: None,
                 },
                 Post {
                     id: 302,
@@ -182,6 +217,9 @@ mod tests {
                     cooked: "<p>World</p>".to_string(),
                     post_number: 1,
                     created_at: "2026-04-01".to_string(),
+                    like_count: 0,
+                    reply_count: 0,
+                    score: None,
                 },
             ],
         };
@@ -233,6 +271,10 @@ mod tests {
                 category_id: Some(5),
                 posts_count: 2,
                 views: 100,
+                like_count: 0,
+                reply_count: 0,
+                last_posted_at: None,
+                tags: None,
             },
             posts: vec![Post {
                 id: 101,
@@ -243,6 +285,9 @@ mod tests {
                 cooked: "<p>Hello</p>".to_string(),
                 post_number: 1,
                 created_at: "2026-01-01".to_string(),
+                like_count: 0,
+                reply_count: 0,
+                score: None,
             }],
         };
         let output = format_topic_human(&response);
@@ -265,12 +310,56 @@ mod tests {
                 cooked: "<p>New post</p>".to_string(),
                 post_number: 1,
                 created_at: "2026-01-01".to_string(),
+                like_count: 0,
+                reply_count: 0,
+                score: None,
             },
         };
         let output = format_post_human(&response);
         assert!(output.contains("201"));
         assert!(output.contains("42"));
         assert!(output.contains("james"));
+    }
+
+    #[test]
+    fn render_json_error_writes_to_stdout_writer() {
+        let err = CliError {
+            detail: ErrorDetail {
+                code: "TEST_ERROR",
+                message: "something broke".to_string(),
+                suggestion: "try again".to_string(),
+            },
+            human: false,
+        };
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        err.render_to(&mut stdout_buf, &mut stderr_buf);
+        let stdout_str = String::from_utf8(stdout_buf).unwrap();
+        let stderr_str = String::from_utf8(stderr_buf).unwrap();
+        assert!(stderr_str.is_empty(), "JSON errors should not go to stderr");
+        let parsed: serde_json::Value = serde_json::from_str(&stdout_str).unwrap();
+        assert_eq!(parsed["success"], false);
+        assert_eq!(parsed["error"]["code"], "TEST_ERROR");
+    }
+
+    #[test]
+    fn render_human_error_writes_to_stderr_writer() {
+        let err = CliError {
+            detail: ErrorDetail {
+                code: "TEST_ERROR",
+                message: "something broke".to_string(),
+                suggestion: "try again".to_string(),
+            },
+            human: true,
+        };
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
+        err.render_to(&mut stdout_buf, &mut stderr_buf);
+        let stdout_str = String::from_utf8(stdout_buf).unwrap();
+        let stderr_str = String::from_utf8(stderr_buf).unwrap();
+        assert!(stdout_str.is_empty(), "Human errors should not go to stdout");
+        assert!(stderr_str.contains("something broke"));
+        assert!(stderr_str.contains("try again"));
     }
 
     #[test]
@@ -284,5 +373,130 @@ mod tests {
             human: false,
         };
         assert_eq!(err.exit_code(), 1);
+    }
+
+    // ---- New field formatting tests ----
+
+    #[test]
+    fn format_topic_human_shows_like_and_reply_counts() {
+        let response = TopicResponse {
+            topic: Topic {
+                id: 42,
+                title: "My Topic".to_string(),
+                slug: "my-topic".to_string(),
+                category_id: Some(5),
+                posts_count: 2,
+                views: 100,
+                like_count: 15,
+                reply_count: 7,
+                last_posted_at: Some("2026-04-01T12:00:00Z".to_string()),
+                tags: Some(vec!["rust".to_string(), "cli".to_string()]),
+            },
+            posts: vec![],
+        };
+        let output = format_topic_human(&response);
+        assert!(output.contains("15"), "Expected like_count in output");
+        assert!(output.contains("Likes"), "Expected Likes label");
+        assert!(output.contains("Replies"), "Expected Replies label");
+        assert!(output.contains("7"), "Expected reply_count in output");
+        assert!(output.contains("rust"), "Expected tag in output");
+        assert!(output.contains("cli"), "Expected tag in output");
+        assert!(output.contains("2026-04-01"), "Expected last_posted_at");
+    }
+
+    #[test]
+    fn format_topic_human_omits_zero_counts_and_missing_fields() {
+        let response = TopicResponse {
+            topic: Topic {
+                id: 42,
+                title: "My Topic".to_string(),
+                slug: "my-topic".to_string(),
+                category_id: Some(5),
+                posts_count: 2,
+                views: 100,
+                like_count: 0,
+                reply_count: 0,
+                last_posted_at: None,
+                tags: None,
+            },
+            posts: vec![],
+        };
+        let output = format_topic_human(&response);
+        assert!(!output.contains("Likes"), "Should not show Likes when zero");
+        assert!(!output.contains("Replies"), "Should not show Replies when zero");
+        assert!(!output.contains("Tags"), "Should not show Tags when missing");
+        assert!(
+            !output.contains("Last posted"),
+            "Should not show Last posted when missing"
+        );
+    }
+
+    #[test]
+    fn format_post_human_shows_counts_when_nonzero() {
+        let response = CreatePostResponse {
+            post: Post {
+                id: 201,
+                topic_id: 42,
+                topic_title: None,
+                username: "james".to_string(),
+                raw: None,
+                cooked: "<p>New post</p>".to_string(),
+                post_number: 1,
+                created_at: "2026-01-01".to_string(),
+                like_count: 3,
+                reply_count: 1,
+                score: None,
+            },
+        };
+        let output = format_post_human(&response);
+        assert!(output.contains("3"), "Expected like_count");
+        assert!(output.contains("1"), "Expected reply_count");
+    }
+
+    #[test]
+    fn format_post_human_omits_zero_counts() {
+        let response = CreatePostResponse {
+            post: Post {
+                id: 201,
+                topic_id: 42,
+                topic_title: None,
+                username: "james".to_string(),
+                raw: None,
+                cooked: "<p>New post</p>".to_string(),
+                post_number: 1,
+                created_at: "2026-01-01".to_string(),
+                like_count: 0,
+                reply_count: 0,
+                score: None,
+            },
+        };
+        let output = format_post_human(&response);
+        assert!(!output.contains("Likes"), "Should not show Likes when zero");
+        assert!(
+            !output.contains("Replies"),
+            "Should not show Replies when zero"
+        );
+    }
+
+    #[test]
+    fn format_latest_posts_human_shows_counts_when_nonzero() {
+        let response = LatestPostsResponse {
+            posts: vec![Post {
+                id: 301,
+                topic_id: 50,
+                topic_title: Some("Welcome".to_string()),
+                username: "james".to_string(),
+                raw: None,
+                cooked: "<p>Hello</p>".to_string(),
+                post_number: 1,
+                created_at: "2026-04-01".to_string(),
+                like_count: 10,
+                reply_count: 4,
+                score: None,
+            }],
+        };
+        let output = format_latest_posts_human(&response);
+        assert!(output.contains("10"), "Expected like_count in summary");
+        assert!(output.contains("4"), "Expected reply_count in summary");
     }
 }
