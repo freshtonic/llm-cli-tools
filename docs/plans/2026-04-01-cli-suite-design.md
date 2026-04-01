@@ -2,11 +2,12 @@
 
 ## Architecture
 
-Three crates in a Cargo workspace, plus a thin dispatcher:
+Four crates in a Cargo workspace, plus a thin dispatcher:
 
 - **`llm-cli`** — git-style dispatcher that execs `llm-cli-<subcommand>`
-- **`llm-cli-linear`** — Linear API client
-- **`llm-cli-discourse`** — Discourse API client
+- **`llm-cli-linear`** — Linear API client (GraphQL)
+- **`llm-cli-discourse`** — Discourse API client (REST)
+- **`llm-cli-slack`** — Slack API client (REST)
 
 All crates live under `packages/`.
 
@@ -44,18 +45,35 @@ Path: `$XDG_CONFIG_HOME/llm-cli/config.toml` (defaults to `~/.config/llm-cli/con
 
 ```toml
 [linear]
-api_url = "https://api.linear.app"
+api_url = "https://api.linear.app"  # optional, has default
 op_item_id = "abc123-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 
 [discourse.my-forum]
 base_url = "https://forum.example.com"
 op_item_id = "def456-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 api_username = "james"
+
+[slack]
+op_item_id = "ghi789-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 ```
 
 ## Authentication
 
-Both tools retrieve API keys from 1Password at call time via `op item get <op_item_id> --field credential`. The item ID comes from config. No caching, no wrapper binary — each invocation calls `op` directly.
+All tools retrieve API keys from 1Password at call time via `op item get <op_item_id> --field <op_field> --reveal`. The item ID and field name come from config. No caching — each invocation calls `op` directly. Empty credentials are detected and reported as errors.
+
+## Debugging
+
+All API crates support `--debug` with comma-separated modes:
+
+- `--debug` — compact request/response logging to stderr (auth redacted)
+- `--debug=pretty` — pretty-printed JSON bodies; GraphQL queries printed as readable text blocks
+- `--debug=curl_cmd` — prints reproducible curl commands with unredacted secrets (prompts for confirmation)
+- `--debug=pretty,curl_cmd` — both
+
+HTTP error responses (4xx/5xx) are logged with full status, headers, and body before being reported as errors.
 
 ## `llm-cli` Dispatcher
 
@@ -78,13 +96,9 @@ No flags of its own beyond `--help`. No config. No auth.
 - `issues create --title <title> --team <team> [--description <desc>] [--priority <1-4>]` — create an issue
 - `issues close --id <issue-id>` — close an issue (sets state to "Done")
 
-### Common flags
-
-- `--human` — human-readable output
-
 ### API
 
-GraphQL. Each subcommand constructs the appropriate query/mutation with only the fields needed.
+GraphQL at `{api_url}/graphql`. Auth header: `Authorization: <api_key>` (no Bearer prefix).
 
 ### Config
 
@@ -92,16 +106,18 @@ GraphQL. Each subcommand constructs the appropriate query/mutation with only the
 [linear]
 api_url = "https://api.linear.app"  # optional, has default
 op_item_id = "abc123-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 ```
 
 ## `llm-cli-discourse`
 
 ### Subcommands
 
-- `posts get --id <post-id>` — fetch a single post
-- `posts create --title <title> --category <category> [--raw <body>]` — create a new topic/post
-- `posts delete --id <post-id>` — delete a post
-- `comments create --post-id <post-id> --raw <body>` — reply to a post
+- `posts latest` — list the latest posts across all topics
+- `posts get --id <post-id>` — fetch a single post/topic
+- `posts create --title <title> --category <category> [--raw <body>]` — create a new topic
+- `posts delete --id <post-id>` — delete a topic
+- `comments create --post-id <post-id> --raw <body>` — reply to a topic
 - `comments delete --id <comment-id>` — delete a comment/reply
 
 ### Common flags
@@ -111,7 +127,7 @@ op_item_id = "abc123-some-uuid"
 
 ### API
 
-REST/JSON. API key and username sent via `Api-Key` and `Api-Username` headers.
+REST/JSON. Auth via `Api-Key` and `Api-Username` headers. Category lookup by name is supported (case-insensitive).
 
 ### Config
 
@@ -119,28 +135,51 @@ REST/JSON. API key and username sent via `Api-Key` and `Api-Username` headers.
 [discourse.my-forum]
 base_url = "https://forum.example.com"
 op_item_id = "def456-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 api_username = "james"
+```
+
+## `llm-cli-slack`
+
+### Subcommands
+
+- `messages send --channel <ch> --text <t> [--thread-ts <ts>]` — send to channel or thread
+- `messages read --channel <ch> [--limit <n>]` — read recent channel history
+- `messages dm --user <u> --text <t>` — send a direct message (opens DM channel automatically)
+- `messages mentions [--limit <n>]` — search messages mentioning the authenticated user
+- `summary --channel <ch> [--oldest <date>] [--latest <date>]` — Slack AI channel summary (defaults to yesterday + today)
+
+### API
+
+REST at `https://slack.com/api/*`. Auth via `Authorization: Bearer <token>` header. Uses `search.messages` for mentions and `conversations.requestSummarize` for AI summaries.
+
+### Config
+
+```toml
+[slack]
+op_item_id = "ghi789-some-uuid"
+op_field = "credential"             # optional, defaults to "credential"
 ```
 
 ## Error Handling
 
-Common error scenarios across both tools:
+Common error scenarios across all tools:
 
 - `op` not found or not running — clear error with setup instructions
 - API key retrieval failed — include the item ID in the error message
+- API key field empty — explicit error naming the field and item
 - Config file missing or malformed — error with expected config path and example
-- API request failed — pass through HTTP status and API error message
+- API request failed — pass through HTTP status and response body
 
 ## Dependencies
 
 **`llm-cli`:** no dependencies (std only)
 
-**`llm-cli-linear` and `llm-cli-discourse`:**
+**`llm-cli-linear`, `llm-cli-discourse`, `llm-cli-slack`:**
 
 - `clap` — argument parsing (derive)
 - `serde` / `serde_json` — JSON serialization
 - `toml` — config parsing
 - `ureq` — HTTP client (blocking, no async runtime)
-- `dirs` — XDG directory resolution
 
 No async runtime. Short-lived CLI invocations making one or two HTTP calls.
