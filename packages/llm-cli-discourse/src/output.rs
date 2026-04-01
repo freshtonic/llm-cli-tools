@@ -61,40 +61,71 @@ pub fn format_error(detail: &ErrorDetail) -> String {
     serde_json::to_string_pretty(&wrapper).expect("serialization should not fail")
 }
 
-/// Format a topic response as human-readable text.
+/// Get the best available content from a post — prefer raw (markdown) over cooked (HTML).
+fn post_content(post: &Post) -> String {
+    if let Some(ref raw) = post.raw {
+        if !raw.is_empty() {
+            return raw.clone();
+        }
+    }
+    strip_html(&post.cooked)
+}
+
+/// Strip HTML tags for a basic plain-text/markdown fallback.
+fn strip_html(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut in_tag = false;
+    for ch in html.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
+/// Format a topic response as markdown.
 pub fn format_topic_human(response: &TopicResponse) -> String {
     let t = &response.topic;
-    let mut out = format!(
-        "Topic #{} — {}\nSlug: {}  Category: {}  Posts: {}  Views: {}\n",
-        t.id,
-        t.title,
-        t.slug,
-        t.category_id
-            .map(|id| id.to_string())
-            .unwrap_or_else(|| "none".to_string()),
-        t.posts_count,
-        t.views,
-    );
+    let category = t
+        .category_id
+        .map(|id| id.to_string())
+        .unwrap_or_else(|| "none".to_string());
+
+    let mut out = format!("## {}\n\n", t.title);
+    out.push_str(&format!("- **Topic ID:** {}\n", t.id));
+    out.push_str(&format!("- **Category:** {category}\n"));
+    out.push_str(&format!("- **Posts:** {}\n", t.posts_count));
+    out.push_str(&format!("- **Views:** {}\n", t.views));
 
     for post in &response.posts {
         out.push_str(&format!(
-            "\n  #{} by {} ({})\n  {}\n",
-            post.post_number, post.username, post.created_at, post.cooked
+            "\n### #{} by {} ({})\n\n{}\n",
+            post.post_number,
+            post.username,
+            post.created_at,
+            post_content(post),
         ));
     }
     out
 }
 
-/// Format a created post as human-readable text.
+/// Format a created post as markdown.
 pub fn format_post_human(response: &CreatePostResponse) -> String {
     let p = &response.post;
     format!(
-        "Post #{} in topic #{} by {} ({})\n{}",
-        p.id, p.topic_id, p.username, p.created_at, p.cooked
+        "## Post #{} in topic #{}\n\n- **By:** {} ({})\n\n{}\n",
+        p.id,
+        p.topic_id,
+        p.username,
+        p.created_at,
+        post_content(p),
     )
 }
 
-/// Format the latest posts list as human-readable text.
+/// Format the latest posts list as markdown.
 pub fn format_latest_posts_human(response: &LatestPostsResponse) -> String {
     let mut out = String::new();
     if response.posts.is_empty() {
@@ -105,20 +136,21 @@ pub fn format_latest_posts_human(response: &LatestPostsResponse) -> String {
                 out.push_str("\n---\n\n");
             }
             out.push_str(&format_post_summary(post));
-            out.push('\n');
         }
     }
     out
 }
 
 fn format_post_summary(post: &Post) -> String {
-    let title = post
-        .topic_title
-        .as_deref()
-        .unwrap_or("(untitled)");
+    let title = post.topic_title.as_deref().unwrap_or("(untitled)");
     format!(
-        "#{} — {}\nBy {} in topic #{} ({})\n{}",
-        post.id, title, post.username, post.topic_id, post.created_at, post.cooked
+        "## #{} — {}\n\n- **By:** {} in topic #{}\n- **Date:** {}\n\n{}\n",
+        post.id,
+        title,
+        post.username,
+        post.topic_id,
+        post.created_at,
+        post_content(post),
     )
 }
 
@@ -214,10 +246,11 @@ mod tests {
             }],
         };
         let output = format_topic_human(&response);
-        assert!(output.contains("My Topic"));
-        assert!(output.contains("my-topic"));
+        assert!(output.contains("## My Topic"));
         assert!(output.contains("james"));
-        assert!(output.contains("<p>Hello</p>"));
+        // HTML should be stripped since raw is None
+        assert!(output.contains("Hello"));
+        assert!(!output.contains("<p>"));
     }
 
     #[test]

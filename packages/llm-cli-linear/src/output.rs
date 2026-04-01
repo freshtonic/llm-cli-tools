@@ -61,7 +61,7 @@ pub fn format_error(detail: &ErrorDetail) -> String {
     serde_json::to_string_pretty(&wrapper).expect("serialization should not fail")
 }
 
-/// Format a single issue as human-readable text.
+/// Format a single issue as markdown.
 pub fn format_issue_human(issue: &Issue) -> String {
     let state = issue
         .state
@@ -72,15 +72,19 @@ pub fn format_issue_human(issue: &Issue) -> String {
         .priority
         .map(|p| format!("P{}", p as u8))
         .unwrap_or_else(|| "None".to_string());
-    let description = issue.description.as_deref().unwrap_or("(no description)");
 
-    format!(
-        "{} — {}\nState: {}  Priority: {}\n{}\n{}",
-        issue.identifier, issue.title, state, priority, description, issue.url
-    )
+    let mut out = format!("## {} — {}\n\n", issue.identifier, issue.title);
+    out.push_str(&format!("- **State:** {state}\n"));
+    out.push_str(&format!("- **Priority:** {priority}\n"));
+    out.push_str(&format!("- **URL:** {}\n", issue.url));
+
+    if let Some(ref desc) = issue.description {
+        out.push_str(&format!("\n{desc}\n"));
+    }
+    out
 }
 
-/// Format a list of issues as human-readable text.
+/// Format a list of issues as markdown.
 pub fn format_issue_list_human(result: &IssueListResult) -> String {
     let mut out = String::new();
     if result.issues.is_empty() {
@@ -91,11 +95,10 @@ pub fn format_issue_list_human(result: &IssueListResult) -> String {
                 out.push_str("\n---\n\n");
             }
             out.push_str(&format_issue_human(issue));
-            out.push('\n');
         }
     }
     if let Some(ref msg) = result.message {
-        out.push_str(&format!("\n{msg}\n"));
+        out.push_str(&format!("\n> {msg}\n"));
     }
     out
 }
@@ -182,7 +185,8 @@ mod tests {
         let output = format_issue_human(&issue);
         assert!(output.contains("Unknown"));
         assert!(output.contains("None"));
-        assert!(output.contains("(no description)"));
+        // No description field should be absent, not "(no description)"
+        assert!(!output.contains("description"));
     }
 
     #[test]

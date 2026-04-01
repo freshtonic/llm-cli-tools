@@ -54,7 +54,7 @@ pub fn format_error(detail: &ErrorDetail) -> String {
 
 pub fn format_send_human(result: &SendResult) -> String {
     format!(
-        "Sent to {} (ts: {})\n{}",
+        "## Message sent\n\n- **Channel:** {}\n- **Timestamp:** {}\n\n{}\n",
         result.channel, result.ts, result.message.text
     )
 }
@@ -69,20 +69,20 @@ pub fn format_history_human(result: &HistoryResult) -> String {
                 out.push('\n');
             }
             let user = msg.user.as_deref().unwrap_or("unknown");
-            out.push_str(&format!("[{}] {}: {}\n", msg.ts, user, msg.text));
+            out.push_str(&format!("### {} `{}`\n\n{}\n", user, msg.ts, msg.text));
         }
     }
     if let Some(ref msg) = result.message {
-        out.push_str(&format!("\n{msg}\n"));
+        out.push_str(&format!("\n> {msg}\n"));
     }
     out
 }
 
 pub fn format_search_human(result: &SearchResult) -> String {
-    let mut out = format!("{} result(s) found.\n\n", result.total);
+    let mut out = format!("**{} result(s) found.**\n\n", result.total);
     for (i, msg) in result.messages.iter().enumerate() {
         if i > 0 {
-            out.push('\n');
+            out.push_str("\n---\n\n");
         }
         let user = msg.user.as_deref().unwrap_or("unknown");
         let channel_name = msg
@@ -91,18 +91,19 @@ pub fn format_search_human(result: &SearchResult) -> String {
             .map(|c| c.name.as_str())
             .unwrap_or("DM");
         out.push_str(&format!(
-            "[{}] {} in #{}: {}\n",
-            msg.ts, user, channel_name, msg.text
+            "### {} in #{} `{}`\n\n",
+            user, channel_name, msg.ts
         ));
+        out.push_str(&format!("{}\n", msg.text));
         if let Some(ref link) = msg.permalink {
-            out.push_str(&format!("  {link}\n"));
+            out.push_str(&format!("\n[View in Slack]({link})\n"));
         }
     }
     out
 }
 
 pub fn format_summary_human(result: &SummaryResult) -> String {
-    result.summary.clone()
+    format!("## Channel Summary\n\n{}\n", result.summary)
 }
 
 #[cfg(test)]
@@ -184,8 +185,10 @@ mod tests {
             message: None,
         };
         let output = format_history_human(&result);
-        assert!(output.contains("alice: hey"));
-        assert!(output.contains("bob: hi"));
+        assert!(output.contains("### alice"));
+        assert!(output.contains("hey"));
+        assert!(output.contains("### bob"));
+        assert!(output.contains("hi"));
     }
 
     #[test]
@@ -193,7 +196,8 @@ mod tests {
         let result = SummaryResult {
             summary: "The team discussed plans.".to_string(),
         };
-        assert_eq!(format_summary_human(&result), "The team discussed plans.");
+        assert!(format_summary_human(&result).contains("The team discussed plans."));
+        assert!(format_summary_human(&result).contains("## Channel Summary"));
     }
 
     #[test]
