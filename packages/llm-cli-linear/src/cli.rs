@@ -54,6 +54,7 @@ impl DebugConfig {
 #[derive(Debug, Parser)]
 #[command(
     name = "llm-cli-linear",
+    version,
     about = "CLI tool for interacting with the Linear API. Returns JSON by default. \
              Use --human for human-readable output. Retrieves API credentials from \
              1Password at call time."

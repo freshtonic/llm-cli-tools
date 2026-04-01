@@ -15,6 +15,8 @@ fn main() {
 enum Action {
     /// Show help/usage (no subcommand given, or --help).
     Help,
+    /// Show version.
+    Version,
     /// Dispatch to a subcommand binary with the given remaining args.
     Dispatch {
         subcommand: String,
@@ -26,6 +28,7 @@ enum Action {
 fn parse_args(args: Vec<String>) -> Action {
     match args.first().map(|s| s.as_str()) {
         None | Some("--help") | Some("-h") => Action::Help,
+        Some("--version") | Some("-V") => Action::Version,
         Some(_) => {
             let mut iter = args.into_iter();
             let subcommand = iter.next().unwrap();
@@ -88,6 +91,10 @@ fn run(args: Vec<String>) -> Result<(), String> {
             print!("{}", format_help(&subcommands));
             Ok(())
         }
+        Action::Version => {
+            println!("llm-cli {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Action::Dispatch { subcommand, args } => {
             let binary = format!("llm-cli-{subcommand}");
             let err = std::process::Command::new(&binary).args(&args).exec();
@@ -124,6 +131,18 @@ mod tests {
     fn parse_args_h_flag_returns_help() {
         let action = parse_args(vec!["-h".to_string()]);
         assert!(matches!(action, Action::Help));
+    }
+
+    #[test]
+    fn parse_args_version_flag_returns_version() {
+        let action = parse_args(vec!["--version".to_string()]);
+        assert!(matches!(action, Action::Version));
+    }
+
+    #[test]
+    fn parse_args_v_flag_returns_version() {
+        let action = parse_args(vec!["-V".to_string()]);
+        assert!(matches!(action, Action::Version));
     }
 
     #[test]

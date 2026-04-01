@@ -53,6 +53,7 @@ impl DebugConfig {
 #[derive(Debug, Parser)]
 #[command(
     name = "llm-cli-slack",
+    version,
     about = "CLI tool for interacting with the Slack API. Returns JSON by default. \
              Use --human for human-readable output. Retrieves API credentials from \
              1Password at call time."
