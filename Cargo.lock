@@ -276,6 +276,15 @@ version = "0.1.0"
 [[package]]
 name = "llm-cli-discourse"
 version = "0.1.0"
+dependencies = [
+ "clap",
+ "dirs",
+ "indoc",
+ "serde",
+ "serde_json",
+ "toml",
+ "ureq",
+]
 
 [[package]]
 name = "llm-cli-linear"
