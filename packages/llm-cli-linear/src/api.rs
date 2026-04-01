@@ -354,9 +354,9 @@ pub fn execute(
 
     if debug.is_some() {
         let auth_display = if curl_cmd {
-            format!("Bearer {api_key}")
+            api_key.to_string()
         } else {
-            "Bearer <redacted>".to_string()
+            "<redacted>".to_string()
         };
         eprintln!(">>> POST {url}");
         eprintln!(">>> Authorization: {auth_display}");
@@ -366,7 +366,7 @@ pub fn execute(
         if curl_cmd {
             eprintln!(">>> ");
             eprintln!(">>> curl -X POST '{url}' \\");
-            eprintln!(">>>   -H 'Authorization: Bearer {api_key}' \\");
+            eprintln!(">>>   -H 'Authorization: {api_key}' \\");
             eprintln!(">>>   -H 'Content-Type: application/json' \\");
             eprintln!(">>>   -d '{body}'");
         }
@@ -380,7 +380,7 @@ pub fn execute(
     );
     let mut response = match agent
         .post(&url)
-        .header("Authorization", &format!("Bearer {api_key}"))
+        .header("Authorization", &api_key.to_string())
         .header("Content-Type", "application/json")
         .send(&body)
     {
