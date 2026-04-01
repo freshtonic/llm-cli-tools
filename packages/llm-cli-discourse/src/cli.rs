@@ -43,6 +43,8 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum PostsAction {
+    /// List the latest posts across all topics.
+    Latest,
     /// Fetch a single post/topic by ID.
     Get {
         /// The topic ID.
@@ -100,6 +102,17 @@ mod tests {
 
     fn parse_args(args: &[&str]) -> Result<Cli, clap::Error> {
         Cli::try_parse_from(std::iter::once("llm-cli-discourse").chain(args.iter().copied()))
+    }
+
+    #[test]
+    fn posts_latest() {
+        let cli = parse_args(&["posts", "latest"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Posts {
+                action: PostsAction::Latest,
+            }
+        ));
     }
 
     #[test]

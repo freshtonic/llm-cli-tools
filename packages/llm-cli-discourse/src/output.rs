@@ -4,7 +4,7 @@
 //! Error responses use `{"success": false, "error": {"code": "...", "message": "...", "suggestion": "..."}}`.
 //! With `--human`, errors go to stderr as plain text, data to stdout as formatted text.
 
-use crate::api::{CreatePostResponse, TopicResponse};
+use crate::api::{CreatePostResponse, LatestPostsResponse, Post, TopicResponse};
 use serde::Serialize;
 
 /// A structured error with code, message, and suggestion for recovery.
@@ -94,10 +94,79 @@ pub fn format_post_human(response: &CreatePostResponse) -> String {
     )
 }
 
+/// Format the latest posts list as human-readable text.
+pub fn format_latest_posts_human(response: &LatestPostsResponse) -> String {
+    let mut out = String::new();
+    if response.posts.is_empty() {
+        out.push_str("No posts found.\n");
+    } else {
+        for (i, post) in response.posts.iter().enumerate() {
+            if i > 0 {
+                out.push_str("\n---\n\n");
+            }
+            out.push_str(&format_post_summary(post));
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn format_post_summary(post: &Post) -> String {
+    let title = post
+        .topic_title
+        .as_deref()
+        .unwrap_or("(untitled)");
+    format!(
+        "#{} — {}\nBy {} in topic #{} ({})\n{}",
+        post.id, title, post.username, post.topic_id, post.created_at, post.cooked
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::api::{Post, Topic};
+
+    #[test]
+    fn format_latest_posts_human_with_posts() {
+        let response = LatestPostsResponse {
+            posts: vec![
+                Post {
+                    id: 301,
+                    topic_id: 50,
+                    topic_title: Some("Welcome".to_string()),
+                    username: "james".to_string(),
+                    raw: None,
+                    cooked: "<p>Hello</p>".to_string(),
+                    post_number: 1,
+                    created_at: "2026-04-01".to_string(),
+                },
+                Post {
+                    id: 302,
+                    topic_id: 51,
+                    topic_title: None,
+                    username: "alice".to_string(),
+                    raw: None,
+                    cooked: "<p>World</p>".to_string(),
+                    post_number: 1,
+                    created_at: "2026-04-01".to_string(),
+                },
+            ],
+        };
+        let output = format_latest_posts_human(&response);
+        assert!(output.contains("Welcome"));
+        assert!(output.contains("james"));
+        assert!(output.contains("(untitled)"));
+        assert!(output.contains("alice"));
+        assert!(output.contains("---"));
+    }
+
+    #[test]
+    fn format_latest_posts_human_empty() {
+        let response = LatestPostsResponse { posts: vec![] };
+        let output = format_latest_posts_human(&response);
+        assert!(output.contains("No posts found"));
+    }
 
     #[test]
     fn format_success_wraps_data() {
@@ -136,6 +205,7 @@ mod tests {
             posts: vec![Post {
                 id: 101,
                 topic_id: 42,
+                topic_title: None,
                 username: "james".to_string(),
                 raw: None,
                 cooked: "<p>Hello</p>".to_string(),
@@ -156,6 +226,7 @@ mod tests {
             post: Post {
                 id: 201,
                 topic_id: 42,
+                topic_title: None,
                 username: "james".to_string(),
                 raw: None,
                 cooked: "<p>New post</p>".to_string(),

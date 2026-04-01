@@ -24,6 +24,8 @@ pub struct Topic {
 pub struct Post {
     pub id: u64,
     pub topic_id: u64,
+    #[serde(default)]
+    pub topic_title: Option<String>,
     pub username: String,
     #[serde(default)]
     pub raw: Option<String>,
@@ -36,6 +38,12 @@ pub struct Post {
 #[derive(Debug, Serialize)]
 pub struct TopicResponse {
     pub topic: Topic,
+    pub posts: Vec<Post>,
+}
+
+/// Response from listing latest posts.
+#[derive(Debug, Serialize)]
+pub struct LatestPostsResponse {
     pub posts: Vec<Post>,
 }
 
@@ -101,6 +109,12 @@ impl Client {
         Ok(())
     }
 
+    /// List the latest posts across all topics.
+    pub fn list_latest_posts(&self) -> Result<LatestPostsResponse, String> {
+        let body = self.get("/posts.json")?;
+        parse_latest_posts_response(&body)
+    }
+
     /// Fetch a topic by ID, including its posts.
     pub fn get_topic(&self, topic_id: u64) -> Result<TopicResponse, String> {
         let body = self.get(&format!("/t/{topic_id}.json"))?;
@@ -156,6 +170,21 @@ impl Client {
         let body = self.get("/categories.json")?;
         parse_category_id(&body, name)
     }
+}
+
+/// Parse the latest posts response from `GET /posts.json`.
+pub fn parse_latest_posts_response(body: &Value) -> Result<LatestPostsResponse, String> {
+    let posts_array = body
+        .pointer("/latest_posts")
+        .and_then(|v| v.as_array())
+        .ok_or("Unexpected response: missing latest_posts")?;
+
+    let posts: Vec<Post> = posts_array
+        .iter()
+        .filter_map(|p| serde_json::from_value(p.clone()).ok())
+        .collect();
+
+    Ok(LatestPostsResponse { posts })
 }
 
 /// Parse a topic response from the Discourse API.
@@ -223,6 +252,50 @@ pub fn parse_category_id(body: &Value, name: &str) -> Result<u64, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parse_latest_posts_response_extracts_posts() {
+        let body = serde_json::json!({
+            "latest_posts": [
+                {
+                    "id": 301,
+                    "topic_id": 50,
+                    "topic_title": "Welcome",
+                    "username": "james",
+                    "cooked": "<p>Hello world</p>",
+                    "post_number": 1,
+                    "created_at": "2026-04-01T00:00:00Z"
+                },
+                {
+                    "id": 302,
+                    "topic_id": 51,
+                    "topic_title": "Second topic",
+                    "username": "alice",
+                    "cooked": "<p>Another post</p>",
+                    "post_number": 1,
+                    "created_at": "2026-04-01T01:00:00Z"
+                }
+            ]
+        });
+        let result = parse_latest_posts_response(&body).unwrap();
+        assert_eq!(result.posts.len(), 2);
+        assert_eq!(result.posts[0].id, 301);
+        assert_eq!(result.posts[0].topic_title.as_deref(), Some("Welcome"));
+        assert_eq!(result.posts[1].username, "alice");
+    }
+
+    #[test]
+    fn parse_latest_posts_response_empty() {
+        let body = serde_json::json!({ "latest_posts": [] });
+        let result = parse_latest_posts_response(&body).unwrap();
+        assert!(result.posts.is_empty());
+    }
+
+    #[test]
+    fn parse_latest_posts_response_missing_key() {
+        let body = serde_json::json!({});
+        assert!(parse_latest_posts_response(&body).is_err());
+    }
 
     #[test]
     fn parse_topic_response_extracts_fields() {

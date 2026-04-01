@@ -133,6 +133,16 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
 
     match args.command {
         cli::Command::Posts { action } => match action {
+            cli::PostsAction::Latest => {
+                let response = client
+                    .list_latest_posts()
+                    .map_err(|e| api_error_to_cli(e, human))?;
+                if human {
+                    print!("{}", output::format_latest_posts_human(&response));
+                } else {
+                    println!("{}", output::format_success(&response));
+                }
+            }
             cli::PostsAction::Get { id } => {
                 let response = client
                     .get_topic(id)
