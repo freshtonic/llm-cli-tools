@@ -58,11 +58,28 @@ pub struct Client {
     pub base_url: String,
     pub api_key: String,
     pub api_username: String,
+    pub debug: bool,
 }
 
 impl Client {
+    fn debug_request(&self, method: &str, url: &str, body: Option<&str>) {
+        if self.debug {
+            eprintln!(">>> {method} {url}");
+            eprintln!(">>> Api-Key: <redacted>");
+            eprintln!(">>> Api-Username: {}", self.api_username);
+            if let Some(b) = body {
+                eprintln!(">>> Content-Type: application/json");
+                eprintln!(">>> ");
+                eprintln!(">>> {b}");
+            }
+            eprintln!();
+        }
+    }
+
     fn get(&self, path: &str) -> Result<Value, String> {
         let url = format!("{}{path}", self.base_url);
+        self.debug_request("GET", &url, None);
+
         let mut response = ureq::get(&url)
             .header("Api-Key", &self.api_key)
             .header("Api-Username", &self.api_username)
@@ -70,11 +87,23 @@ impl Client {
             .call()
             .map_err(|e| format!("HTTP request failed: {e}"))?;
 
+        if self.debug {
+            eprintln!("<<< {}", response.status());
+            for (name, value) in response.headers() {
+                eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
+            }
+        }
+
         let text = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read response: {e}"))?;
 
+        if self.debug {
+            eprintln!("<<<");
+            eprintln!("<<< {text}");
+            eprintln!();
+        }
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse response JSON: {e}"))
     }
 
@@ -82,6 +111,8 @@ impl Client {
         let url = format!("{}{path}", self.base_url);
         let body_str =
             serde_json::to_string(body).map_err(|e| format!("Serialization error: {e}"))?;
+
+        self.debug_request("POST", &url, Some(&body_str));
 
         let mut response = ureq::post(&url)
             .header("Api-Key", &self.api_key)
@@ -91,21 +122,49 @@ impl Client {
             .send(&body_str)
             .map_err(|e| format!("HTTP request failed: {e}"))?;
 
+        if self.debug {
+            eprintln!("<<< {}", response.status());
+            for (name, value) in response.headers() {
+                eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
+            }
+        }
+
         let text = response
             .body_mut()
             .read_to_string()
             .map_err(|e| format!("Failed to read response: {e}"))?;
 
+        if self.debug {
+            eprintln!("<<<");
+            eprintln!("<<< {text}");
+            eprintln!();
+        }
         serde_json::from_str(&text).map_err(|e| format!("Failed to parse response JSON: {e}"))
     }
 
     fn delete(&self, path: &str) -> Result<(), String> {
         let url = format!("{}{path}", self.base_url);
-        ureq::delete(&url)
+        self.debug_request("DELETE", &url, None);
+
+        let mut response = ureq::delete(&url)
             .header("Api-Key", &self.api_key)
             .header("Api-Username", &self.api_username)
             .call()
             .map_err(|e| format!("HTTP request failed: {e}"))?;
+
+        if self.debug {
+            eprintln!("<<< {}", response.status());
+            for (name, value) in response.headers() {
+                eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
+            }
+            let text = response
+                .body_mut()
+                .read_to_string()
+                .unwrap_or_default();
+            eprintln!("<<<");
+            eprintln!("<<< {text}");
+            eprintln!();
+        }
         Ok(())
     }
 

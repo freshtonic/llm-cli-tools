@@ -300,9 +300,23 @@ pub fn parse_done_state_id(body: &Value) -> Result<(String, String), String> {
 }
 
 /// Send a GraphQL request to the Linear API.
-pub fn execute(api_url: &str, api_key: &str, request: &GraphqlRequest) -> Result<Value, String> {
+pub fn execute(
+    api_url: &str,
+    api_key: &str,
+    request: &GraphqlRequest,
+    debug: bool,
+) -> Result<Value, String> {
     let url = format!("{api_url}/graphql");
     let body = serde_json::to_string(request).map_err(|e| format!("Serialization error: {e}"))?;
+
+    if debug {
+        eprintln!(">>> POST {url}");
+        eprintln!(">>> Authorization: Bearer <redacted>");
+        eprintln!(">>> Content-Type: application/json");
+        eprintln!(">>> ");
+        eprintln!(">>> {body}");
+        eprintln!();
+    }
 
     let mut response = ureq::post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
@@ -310,10 +324,25 @@ pub fn execute(api_url: &str, api_key: &str, request: &GraphqlRequest) -> Result
         .send(&body)
         .map_err(|e| format!("HTTP request failed: {e}"))?;
 
+    let status = response.status();
+
+    if debug {
+        eprintln!("<<< {status}");
+        for (name, value) in response.headers() {
+            eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
+        }
+    }
+
     let response_text = response
         .body_mut()
         .read_to_string()
         .map_err(|e| format!("Failed to read response: {e}"))?;
+
+    if debug {
+        eprintln!("<<<");
+        eprintln!("<<< {response_text}");
+        eprintln!();
+    }
 
     let response_body: Value = serde_json::from_str(&response_text)
         .map_err(|e| format!("Failed to parse response JSON: {e}"))?;

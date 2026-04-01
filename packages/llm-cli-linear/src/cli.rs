@@ -17,6 +17,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub human: bool,
 
+    /// Print raw HTTP requests and responses (including headers) to stderr.
+    #[arg(long, global = true)]
+    pub debug: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }

@@ -118,6 +118,7 @@ fn api_error_to_cli(msg: String, human: bool) -> output::CliError {
 
 fn run(args: cli::Cli) -> Result<(), output::CliError> {
     let human = args.human;
+    let debug = args.debug;
 
     let cfg =
         config::load(args.instance.as_deref()).map_err(|e| config_error_to_cli(e, human))?;
@@ -129,6 +130,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
         base_url: cfg.base_url,
         api_key,
         api_username: cfg.api_username,
+        debug,
     };
 
     match args.command {

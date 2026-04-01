@@ -18,6 +18,10 @@ pub struct Cli {
     #[arg(long, global = true)]
     pub human: bool,
 
+    /// Print raw HTTP requests and responses (including headers) to stderr.
+    #[arg(long, global = true)]
+    pub debug: bool,
+
     /// Which Discourse instance to use (maps to [discourse.<name>] in config).
     /// Required when multiple instances are configured; auto-selected if only one exists.
     #[arg(long, global = true)]
