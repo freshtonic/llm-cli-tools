@@ -2,5 +2,8 @@
 name = "llm-cli"
 version = "0.1.0"
 edition = "2024"
+description = "A CLI tool for dispatching to llm-cli-* subcommands - designed to be used by AI agents"
+license = "MIT"
+repository = "https://github.com/freshtonic/llm-cli-tools"
 
 [dependencies]

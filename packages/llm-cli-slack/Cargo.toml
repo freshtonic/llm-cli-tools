@@ -2,6 +2,9 @@
 name = "llm-cli-slack"
 version = "0.1.0"
 edition = "2024"
+description = "A CLI tool for interacting with the Slack API - designed to be used by AI agents"
+license = "MIT"
+repository = "https://github.com/freshtonic/llm-cli-tools"
 
 [dependencies]
 clap = { version = "4", features = ["derive"] }
