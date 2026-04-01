@@ -14,12 +14,15 @@ struct FileConfig {
 #[derive(Debug, Deserialize)]
 struct SlackSection {
     op_item_id: Option<String>,
+    op_field: Option<String>,
 }
 
 /// Resolved configuration with all defaults applied.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Config {
     pub op_item_id: String,
+    /// The 1Password field name to read. Defaults to "credential".
+    pub op_field: String,
 }
 
 /// Errors that can occur when loading configuration.
@@ -53,8 +56,14 @@ pub fn parse(toml_str: &str) -> Result<Config, ConfigError> {
 
     let section = file_config.slack.ok_or(ConfigError::MissingSection)?;
     let op_item_id = section.op_item_id.ok_or(ConfigError::MissingOpItemId)?;
+    let op_field = section
+        .op_field
+        .unwrap_or_else(|| "credential".to_string());
 
-    Ok(Config { op_item_id })
+    Ok(Config {
+        op_item_id,
+        op_field,
+    })
 }
 
 /// Return the expected config file path.

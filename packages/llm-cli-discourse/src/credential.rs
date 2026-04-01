@@ -23,10 +23,10 @@ impl std::fmt::Display for CredentialError {
     }
 }
 
-/// Retrieve an API key from 1Password using the given item ID.
-pub fn get_api_key(op_item_id: &str) -> Result<String, CredentialError> {
+/// Retrieve an API key from 1Password using the given item ID and field name.
+pub fn get_api_key(op_item_id: &str, field: &str) -> Result<String, CredentialError> {
     let output = Command::new("op")
-        .args(["item", "get", op_item_id, "--field", "credential", "--reveal"])
+        .args(["item", "get", op_item_id, "--field", field, "--reveal"])
         .output()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -42,5 +42,12 @@ pub fn get_api_key(op_item_id: &str) -> Result<String, CredentialError> {
     }
 
     let key = String::from_utf8_lossy(&output.stdout).trim().to_string();
+
+    if key.is_empty() {
+        return Err(CredentialError::OpFailed(format!(
+            "field '{field}' in item '{op_item_id}' is empty"
+        )));
+    }
+
     Ok(key)
 }

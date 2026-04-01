@@ -17,6 +17,7 @@ struct FileConfig {
 struct DiscourseSection {
     base_url: Option<String>,
     op_item_id: Option<String>,
+    op_field: Option<String>,
     api_username: Option<String>,
 }
 
@@ -26,6 +27,8 @@ pub struct InstanceConfig {
     pub name: String,
     pub base_url: String,
     pub op_item_id: String,
+    /// The 1Password field name to read. Defaults to "credential".
+    pub op_field: String,
     pub api_username: String,
 }
 
@@ -102,6 +105,10 @@ fn resolve_instance(
             instance: name.to_string(),
             field: "op_item_id",
         })?;
+    let op_field = section
+        .op_field
+        .clone()
+        .unwrap_or_else(|| "credential".to_string());
     let api_username = section
         .api_username
         .clone()
@@ -114,6 +121,7 @@ fn resolve_instance(
         name: name.to_string(),
         base_url,
         op_item_id,
+        op_field,
         api_username,
     })
 }

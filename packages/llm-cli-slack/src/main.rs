@@ -173,7 +173,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
 
     let cfg = config::load().map_err(|e| config_error_to_cli(e, human))?;
 
-    let token = credential::get_api_key(&cfg.op_item_id)
+    let token = credential::get_api_key(&cfg.op_item_id, &cfg.op_field)
         .map_err(|e| credential_error_to_cli(e, &cfg.op_item_id, human))?;
 
     let client = api::Client { token, debug };

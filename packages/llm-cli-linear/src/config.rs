@@ -19,6 +19,7 @@ struct FileConfig {
 struct LinearSection {
     api_url: Option<String>,
     op_item_id: Option<String>,
+    op_field: Option<String>,
 }
 
 /// Resolved configuration with all defaults applied.
@@ -26,6 +27,8 @@ struct LinearSection {
 pub struct Config {
     pub api_url: String,
     pub op_item_id: String,
+    /// The 1Password field name to read. Defaults to "credential".
+    pub op_field: String,
 }
 
 /// Errors that can occur when loading configuration.
@@ -66,10 +69,14 @@ pub fn parse(toml_str: &str) -> Result<Config, ConfigError> {
     let api_url = section
         .api_url
         .unwrap_or_else(|| DEFAULT_API_URL.to_string());
+    let op_field = section
+        .op_field
+        .unwrap_or_else(|| "credential".to_string());
 
     Ok(Config {
         api_url,
         op_item_id,
+        op_field,
     })
 }
 
