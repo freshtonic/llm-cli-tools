@@ -75,6 +75,14 @@ pub struct Client {
 }
 
 impl Client {
+    fn debug_error(&self, e: &ureq::Error) -> String {
+        if self.is_debug() {
+            eprintln!("<<< ERROR: {e}");
+            eprintln!();
+        }
+        format!("HTTP request failed: {e}")
+    }
+
     fn is_debug(&self) -> bool {
         self.debug.is_some()
     }
@@ -108,7 +116,7 @@ impl Client {
             .header("Authorization", &format!("Bearer {}", self.token))
             .header("Content-Type", "application/json; charset=utf-8")
             .send(&body_str)
-            .map_err(|e| format!("HTTP request failed: {e}"))?;
+            .map_err(|e| self.debug_error(&e))?;
 
         if self.is_debug() {
             eprintln!("<<< {}", response.status());
@@ -157,7 +165,7 @@ impl Client {
         let mut response = ureq::get(&url)
             .header("Authorization", &format!("Bearer {}", self.token))
             .call()
-            .map_err(|e| format!("HTTP request failed: {e}"))?;
+            .map_err(|e| self.debug_error(&e))?;
 
         if self.is_debug() {
             eprintln!("<<< {}", response.status());

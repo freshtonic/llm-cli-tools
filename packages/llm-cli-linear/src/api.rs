@@ -360,16 +360,23 @@ pub fn execute(
         eprintln!();
     }
 
-    let mut response = ureq::post(&url)
+    let mut response = match ureq::post(&url)
         .header("Authorization", &format!("Bearer {api_key}"))
         .header("Content-Type", "application/json")
         .send(&body)
-        .map_err(|e| format!("HTTP request failed: {e}"))?;
-
-    let status = response.status();
+    {
+        Ok(resp) => resp,
+        Err(e) => {
+            if debug.is_some() {
+                eprintln!("<<< ERROR: {e}");
+                eprintln!();
+            }
+            return Err(format!("HTTP request failed: {e}"));
+        }
+    };
 
     if debug.is_some() {
-        eprintln!("<<< {status}");
+        eprintln!("<<< {}", response.status());
         for (name, value) in response.headers() {
             eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
         }

@@ -81,6 +81,14 @@ impl Client {
         }
     }
 
+    fn debug_error(&self, e: &ureq::Error) -> String {
+        if self.is_debug() {
+            eprintln!("<<< ERROR: {e}");
+            eprintln!();
+        }
+        format!("HTTP request failed: {e}")
+    }
+
     fn debug_request(&self, method: &str, url: &str, body: Option<&str>) {
         if self.is_debug() {
             eprintln!(">>> {method} {url}");
@@ -104,7 +112,7 @@ impl Client {
             .header("Api-Username", &self.api_username)
             .header("Accept", "application/json")
             .call()
-            .map_err(|e| format!("HTTP request failed: {e}"))?;
+            .map_err(|e| self.debug_error(&e))?;
 
         if self.is_debug() {
             eprintln!("<<< {}", response.status());
@@ -139,7 +147,7 @@ impl Client {
             .header("Content-Type", "application/json")
             .header("Accept", "application/json")
             .send(&body_str)
-            .map_err(|e| format!("HTTP request failed: {e}"))?;
+            .map_err(|e| self.debug_error(&e))?;
 
         if self.is_debug() {
             eprintln!("<<< {}", response.status());
@@ -169,7 +177,7 @@ impl Client {
             .header("Api-Key", &self.api_key)
             .header("Api-Username", &self.api_username)
             .call()
-            .map_err(|e| format!("HTTP request failed: {e}"))?;
+            .map_err(|e| self.debug_error(&e))?;
 
         if self.is_debug() {
             eprintln!("<<< {}", response.status());

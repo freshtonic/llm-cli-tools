@@ -28,7 +28,7 @@ pub struct Cli {
 
     /// Print raw HTTP requests and responses to stderr.
     /// Use --debug for compact output, --debug=pretty for formatted bodies.
-    #[arg(long, global = true, default_missing_value = "compact", num_args = 0..=1)]
+    #[arg(long, global = true, default_missing_value = "compact", num_args = 0..=1, require_equals = true)]
     pub debug: Option<DebugMode>,
 
     #[command(subcommand)]
