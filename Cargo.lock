@@ -109,6 +109,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap_complete"
+version = "4.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19c9f1dde76b736e3681f28cec9d5a61299cbaae0fce80a68e43724ad56031eb"
+dependencies = [
+ "clap",
+]
+
+[[package]]
 name = "clap_derive"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -248,6 +257,7 @@ name = "llm-cli-discourse"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "indoc",
  "libc",
  "serde",
@@ -261,6 +271,7 @@ name = "llm-cli-linear"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "indoc",
  "libc",
  "serde",
@@ -274,6 +285,7 @@ name = "llm-cli-slack"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "clap_complete",
  "indoc",
  "libc",
  "serde",

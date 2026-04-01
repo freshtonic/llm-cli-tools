@@ -4,6 +4,7 @@
 //! Global flag: `--human` for human-readable output instead of JSON.
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 /// Parsed debug configuration from comma-separated flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -80,6 +81,12 @@ pub enum Command {
     Issues {
         #[command(subcommand)]
         action: IssuesAction,
+    },
+    /// Generate shell completions.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(long)]
+        shell: Shell,
     },
 }
 

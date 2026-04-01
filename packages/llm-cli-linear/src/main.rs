@@ -91,6 +91,12 @@ fn api_error_to_cli(msg: String, human: bool) -> output::CliError {
 }
 
 fn run(args: cli::Cli) -> Result<(), output::CliError> {
+    if let cli::Command::Completions { shell } = &args.command {
+        let mut cmd = <cli::Cli as clap::CommandFactory>::command();
+        clap_complete::generate(*shell, &mut cmd, "llm-cli-linear", &mut std::io::stdout());
+        return Ok(());
+    }
+
     let human = args.human;
     let debug = args
         .debug
@@ -202,6 +208,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                 }
             }
         },
+        cli::Command::Completions { .. } => unreachable!(),
     };
 
     pager::print_with_pager(&out, human, debug.is_some());

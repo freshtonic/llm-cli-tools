@@ -4,6 +4,7 @@
 //! Global flag: `--human` for human-readable output.
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 /// Parsed debug configuration from comma-separated flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,12 @@ pub enum Command {
     Messages {
         #[command(subcommand)]
         action: MessagesAction,
+    },
+    /// Generate shell completions.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(long)]
+        shell: Shell,
     },
     /// Get Slack AI-generated channel summary for a date range.
     /// Defaults to today and yesterday.

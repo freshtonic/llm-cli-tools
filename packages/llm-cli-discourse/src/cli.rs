@@ -5,6 +5,7 @@
 //! select which Discourse instance to use from config.
 
 use clap::{Parser, Subcommand};
+use clap_complete::Shell;
 
 /// Parsed debug configuration from comma-separated flags.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,6 +91,12 @@ pub enum Command {
     Comments {
         #[command(subcommand)]
         action: CommentsAction,
+    },
+    /// Generate shell completions.
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(long)]
+        shell: Shell,
     },
 }
 
