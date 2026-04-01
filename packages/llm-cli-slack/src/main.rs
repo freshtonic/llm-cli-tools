@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod credential;
 mod output;
+mod pager;
 
 fn main() {
     let args = cli::parse();
@@ -173,9 +174,10 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
     let token = credential::get_api_key(&cfg.op_item_id, &cfg.op_field)
         .map_err(|e| credential_error_to_cli(e, &cfg.op_item_id, human))?;
 
+    let debug_active = debug.is_some();
     let client = api::Client { token, debug };
 
-    match args.command {
+    let out = match args.command {
         cli::Command::Messages { action } => match action {
             cli::MessagesAction::Send {
                 channel,
@@ -186,9 +188,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .send_message(&channel, &text, thread_ts.as_deref())
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("{}", output::format_send_human(&result));
+                    format!("{}\n", output::format_send_human(&result))
                 } else {
-                    println!("{}", output::format_success(&result));
+                    format!("{}\n", output::format_success(&result))
                 }
             }
             cli::MessagesAction::Read { channel, limit } => {
@@ -196,9 +198,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .read_history(&channel, limit)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    print!("{}", output::format_history_human(&result));
+                    output::format_history_human(&result)
                 } else {
-                    println!("{}", output::format_success(&result));
+                    format!("{}\n", output::format_success(&result))
                 }
             }
             cli::MessagesAction::Dm { user, text } => {
@@ -206,9 +208,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .send_dm(&user, &text)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("{}", output::format_send_human(&result));
+                    format!("{}\n", output::format_send_human(&result))
                 } else {
-                    println!("{}", output::format_success(&result));
+                    format!("{}\n", output::format_success(&result))
                 }
             }
             cli::MessagesAction::Mentions { limit } => {
@@ -216,9 +218,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .search_mentions(limit)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    print!("{}", output::format_search_human(&result));
+                    output::format_search_human(&result)
                 } else {
-                    println!("{}", output::format_success(&result));
+                    format!("{}\n", output::format_success(&result))
                 }
             }
         },
@@ -241,13 +243,14 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                 .map_err(|e| api_error_to_cli(e, human))?;
 
             if human {
-                println!("{}", output::format_summary_human(&result));
+                format!("{}\n", output::format_summary_human(&result))
             } else {
-                println!("{}", output::format_success(&result));
+                format!("{}\n", output::format_success(&result))
             }
         }
-    }
+    };
 
+    pager::print_with_pager(&out, human, debug_active);
     Ok(())
 }
 

@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod credential;
 mod output;
+mod pager;
 
 fn main() {
     let args = cli::parse();
@@ -111,7 +112,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
     let api_key = credential::get_api_key(&cfg.op_item_id, &cfg.op_field)
         .map_err(|e| credential_error_to_cli(e, &cfg.op_item_id, human))?;
 
-    match args.command {
+    let out = match args.command {
         cli::Command::Issues { action } => match action {
             cli::IssuesAction::List {
                 limit,
@@ -142,9 +143,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .map_err(|e| api_error_to_cli(e, human))?;
 
                 if human {
-                    print!("{}", output::format_issue_list_human(&result));
+                    output::format_issue_list_human(&result)
                 } else {
-                    println!("{}", output::format_success(&result));
+                    format!("{}\n", output::format_success(&result))
                 }
             }
             cli::IssuesAction::Get { id } => {
@@ -155,9 +156,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     api::parse_get_response(&response).map_err(|e| api_error_to_cli(e, human))?;
 
                 if human {
-                    println!("{}", output::format_issue_human(&issue));
+                    format!("{}\n", output::format_issue_human(&issue))
                 } else {
-                    println!("{}", output::format_success(&issue));
+                    format!("{}\n", output::format_success(&issue))
                 }
             }
             cli::IssuesAction::Create {
@@ -174,13 +175,12 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .map_err(|e| api_error_to_cli(e, human))?;
 
                 if human {
-                    println!("Created: {}", output::format_issue_human(&issue));
+                    format!("Created: {}\n", output::format_issue_human(&issue))
                 } else {
-                    println!("{}", output::format_success(&issue));
+                    format!("{}\n", output::format_success(&issue))
                 }
             }
             cli::IssuesAction::Close { id } => {
-                // Step 1: Fetch the issue's team and find the "Done" state.
                 let team_request = api::build_issue_team_query(&id);
                 let team_response =
                     api::execute(&cfg.api_url, &api_key, &team_request, debug.as_ref())
@@ -188,7 +188,6 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                 let (issue_id, done_state_id) = api::parse_done_state_id(&team_response)
                     .map_err(|e| api_error_to_cli(e, human))?;
 
-                // Step 2: Update the issue state to "Done".
                 let close_request = api::build_close_mutation(&issue_id, &done_state_id);
                 let close_response =
                     api::execute(&cfg.api_url, &api_key, &close_request, debug.as_ref())
@@ -197,13 +196,14 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .map_err(|e| api_error_to_cli(e, human))?;
 
                 if human {
-                    println!("Closed: {}", output::format_issue_human(&issue));
+                    format!("Closed: {}\n", output::format_issue_human(&issue))
                 } else {
-                    println!("{}", output::format_success(&issue));
+                    format!("{}\n", output::format_success(&issue))
                 }
             }
         },
-    }
+    };
 
+    pager::print_with_pager(&out, human, debug.is_some());
     Ok(())
 }

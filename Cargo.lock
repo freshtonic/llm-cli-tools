@@ -249,6 +249,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indoc",
+ "libc",
  "serde",
  "serde_json",
  "toml",
@@ -261,6 +262,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indoc",
+ "libc",
  "serde",
  "serde_json",
  "toml",
@@ -273,6 +275,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "indoc",
+ "libc",
  "serde",
  "serde_json",
  "toml",

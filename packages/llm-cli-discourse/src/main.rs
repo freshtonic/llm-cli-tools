@@ -3,6 +3,7 @@ mod cli;
 mod config;
 mod credential;
 mod output;
+mod pager;
 
 fn main() {
     let args = cli::parse();
@@ -136,6 +137,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
     let api_key = credential::get_api_key(&cfg.op_item_id, &cfg.op_field)
         .map_err(|e| credential_error_to_cli(e, &cfg.op_item_id, human))?;
 
+    let debug_active = debug.is_some();
     let client = api::Client {
         base_url: cfg.base_url,
         api_key,
@@ -143,16 +145,16 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
         debug,
     };
 
-    match args.command {
+    let out = match args.command {
         cli::Command::Posts { action } => match action {
             cli::PostsAction::Latest => {
                 let response = client
                     .list_latest_posts()
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    print!("{}", output::format_latest_posts_human(&response));
+                    output::format_latest_posts_human(&response)
                 } else {
-                    println!("{}", output::format_success(&response));
+                    format!("{}\n", output::format_success(&response))
                 }
             }
             cli::PostsAction::Get { id } => {
@@ -160,9 +162,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .get_topic(id)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    print!("{}", output::format_topic_human(&response));
+                    output::format_topic_human(&response)
                 } else {
-                    println!("{}", output::format_success(&response));
+                    format!("{}\n", output::format_success(&response))
                 }
             }
             cli::PostsAction::Create {
@@ -174,9 +176,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .create_topic(&title, &category, raw.as_deref())
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("Created: {}", output::format_post_human(&response));
+                    format!("Created: {}\n", output::format_post_human(&response))
                 } else {
-                    println!("{}", output::format_success(&response));
+                    format!("{}\n", output::format_success(&response))
                 }
             }
             cli::PostsAction::Delete { id } => {
@@ -184,15 +186,15 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .delete_topic(id)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("Deleted topic #{id}");
+                    format!("Deleted topic #{id}\n")
                 } else {
-                    println!(
-                        "{}",
+                    format!(
+                        "{}\n",
                         output::format_success(&serde_json::json!({
                             "deleted": true,
                             "topic_id": id
                         }))
-                    );
+                    )
                 }
             }
         },
@@ -202,9 +204,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .create_reply(topic_id, &raw)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("Replied: {}", output::format_post_human(&response));
+                    format!("Replied: {}\n", output::format_post_human(&response))
                 } else {
-                    println!("{}", output::format_success(&response));
+                    format!("{}\n", output::format_success(&response))
                 }
             }
             cli::CommentsAction::Delete { id } => {
@@ -212,19 +214,20 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
                     .delete_post(id)
                     .map_err(|e| api_error_to_cli(e, human))?;
                 if human {
-                    println!("Deleted comment #{id}");
+                    format!("Deleted comment #{id}\n")
                 } else {
-                    println!(
-                        "{}",
+                    format!(
+                        "{}\n",
                         output::format_success(&serde_json::json!({
                             "deleted": true,
                             "post_id": id
                         }))
-                    );
+                    )
                 }
             }
         },
-    }
+    };
 
+    pager::print_with_pager(&out, human, debug_active);
     Ok(())
 }
