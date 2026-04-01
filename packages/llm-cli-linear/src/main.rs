@@ -113,8 +113,29 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
 
     match args.command {
         cli::Command::Issues { action } => match action {
-            cli::IssuesAction::List { limit } => {
-                let request = api::build_list_query(limit);
+            cli::IssuesAction::List {
+                limit,
+                mine,
+                team,
+                state,
+            } => {
+                let mut filters = api::IssueFilters {
+                    team_key: team,
+                    state_name: state,
+                    ..Default::default()
+                };
+
+                if mine {
+                    let viewer_req = api::build_viewer_id_query();
+                    let viewer_resp =
+                        api::execute(&cfg.api_url, &api_key, &viewer_req, debug.as_ref())
+                            .map_err(|e| api_error_to_cli(e, human))?;
+                    let viewer_id = api::parse_viewer_id(&viewer_resp)
+                        .map_err(|e| api_error_to_cli(e, human))?;
+                    filters.assignee_id = Some(viewer_id);
+                }
+
+                let request = api::build_list_query(limit, &filters);
                 let response = api::execute(&cfg.api_url, &api_key, &request, debug.as_ref())
                     .map_err(|e| api_error_to_cli(e, human))?;
                 let result = api::parse_list_response(&response, limit)
@@ -161,8 +182,9 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
             cli::IssuesAction::Close { id } => {
                 // Step 1: Fetch the issue's team and find the "Done" state.
                 let team_request = api::build_issue_team_query(&id);
-                let team_response = api::execute(&cfg.api_url, &api_key, &team_request, debug.as_ref())
-                    .map_err(|e| api_error_to_cli(e, human))?;
+                let team_response =
+                    api::execute(&cfg.api_url, &api_key, &team_request, debug.as_ref())
+                        .map_err(|e| api_error_to_cli(e, human))?;
                 let (issue_id, done_state_id) = api::parse_done_state_id(&team_response)
                     .map_err(|e| api_error_to_cli(e, human))?;
 

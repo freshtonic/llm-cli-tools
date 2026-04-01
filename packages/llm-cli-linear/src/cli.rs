@@ -24,7 +24,11 @@ impl DebugConfig {
                 "compact" => {}
                 "pretty" => config.pretty = true,
                 "curl_cmd" => config.curl_cmd = true,
-                other => return Err(format!("unknown debug mode: '{other}'. Valid modes: compact, pretty, curl_cmd")),
+                other => {
+                    return Err(format!(
+                        "unknown debug mode: '{other}'. Valid modes: compact, pretty, curl_cmd"
+                    ));
+                }
             }
         }
         config.confirm_curl_cmd()?;
@@ -80,11 +84,20 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum IssuesAction {
-    /// List issues assigned to the authenticated user.
+    /// List issues. Returns all visible issues by default. Use filters to narrow results.
     List {
         /// Maximum number of issues to return (default: 25).
         #[arg(long, default_value = "25")]
         limit: u32,
+        /// Only show issues assigned to the authenticated user.
+        #[arg(long)]
+        mine: bool,
+        /// Filter by team key (e.g., "ENG").
+        #[arg(long)]
+        team: Option<String>,
+        /// Filter by workflow state name (e.g., "In Progress", "Todo").
+        #[arg(long)]
+        state: Option<String>,
     },
     /// Fetch a single issue by identifier.
     Get {
@@ -135,7 +148,7 @@ mod tests {
         assert!(!cli.human);
         match cli.command {
             Command::Issues {
-                action: IssuesAction::List { limit },
+                action: IssuesAction::List { limit, .. },
             } => {
                 assert_eq!(limit, 25);
             }
@@ -148,9 +161,36 @@ mod tests {
         let cli = parse_args(&["issues", "list", "--limit", "10"]).unwrap();
         match cli.command {
             Command::Issues {
-                action: IssuesAction::List { limit },
+                action: IssuesAction::List { limit, .. },
             } => {
                 assert_eq!(limit, 10);
+            }
+            _ => panic!("Expected issues list"),
+        }
+    }
+
+    #[test]
+    fn issues_list_with_filters() {
+        let cli = parse_args(&[
+            "issues",
+            "list",
+            "--mine",
+            "--team",
+            "ENG",
+            "--state",
+            "In Progress",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Issues {
+                action:
+                    IssuesAction::List {
+                        mine, team, state, ..
+                    },
+            } => {
+                assert!(mine);
+                assert_eq!(team.as_deref(), Some("ENG"));
+                assert_eq!(state.as_deref(), Some("In Progress"));
             }
             _ => panic!("Expected issues list"),
         }

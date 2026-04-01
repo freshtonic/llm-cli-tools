@@ -42,40 +42,87 @@ pub struct GraphqlRequest {
     pub variables: Option<Value>,
 }
 
-/// Build the GraphQL query for listing issues assigned to the viewer.
-pub fn build_list_query(limit: u32) -> GraphqlRequest {
-    let query = format!(
-        r#"query {{
-  viewer {{
-    assignedIssues(first: {limit}) {{
-      nodes {{
-        id
-        identifier
-        title
-        state {{ name }}
-        priority
-        description
-        url
-      }}
-      pageInfo {{
-        hasNextPage
-      }}
-    }}
-  }}
-}}"#
-    );
+/// Filters for the issues list query.
+#[derive(Debug, Default)]
+pub struct IssueFilters {
+    pub assignee_id: Option<String>,
+    pub team_key: Option<String>,
+    pub state_name: Option<String>,
+}
+
+/// Build the GraphQL query for listing issues with optional filters.
+pub fn build_list_query(limit: u32, filters: &IssueFilters) -> GraphqlRequest {
+    let query = r#"query($first: Int!, $filter: IssueFilter) {
+  issues(first: $first, filter: $filter) {
+    nodes {
+      id
+      identifier
+      title
+      state { name }
+      priority
+      description
+      url
+    }
+    pageInfo {
+      hasNextPage
+    }
+  }
+}"#
+    .to_string();
+
+    let mut filter = serde_json::Map::new();
+    if let Some(ref id) = filters.assignee_id {
+        filter.insert(
+            "assignee".to_string(),
+            serde_json::json!({ "id": { "eq": id } }),
+        );
+    }
+    if let Some(ref key) = filters.team_key {
+        filter.insert(
+            "team".to_string(),
+            serde_json::json!({ "key": { "eq": key } }),
+        );
+    }
+    if let Some(ref name) = filters.state_name {
+        filter.insert(
+            "state".to_string(),
+            serde_json::json!({ "name": { "eq": name } }),
+        );
+    }
+
+    let variables = serde_json::json!({
+        "first": limit,
+        "filter": if filter.is_empty() { Value::Null } else { Value::Object(filter) },
+    });
+
     GraphqlRequest {
         query,
+        variables: Some(variables),
+    }
+}
+
+/// Build a query to get the authenticated user's ID (for --mine filter).
+pub fn build_viewer_id_query() -> GraphqlRequest {
+    GraphqlRequest {
+        query: "query { viewer { id } }".to_string(),
         variables: None,
     }
+}
+
+/// Parse the viewer ID from the response.
+pub fn parse_viewer_id(body: &Value) -> Result<String, String> {
+    body.pointer("/data/viewer/id")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string())
+        .ok_or_else(|| "Failed to get viewer ID".to_string())
 }
 
 /// Parse the response from a list issues query.
 pub fn parse_list_response(body: &Value, limit: u32) -> Result<IssueListResult, String> {
     let nodes = body
-        .pointer("/data/viewer/assignedIssues/nodes")
+        .pointer("/data/issues/nodes")
         .and_then(|v| v.as_array())
-        .ok_or("Unexpected response: missing assignedIssues.nodes")?;
+        .ok_or("Unexpected response: missing issues.nodes")?;
 
     let issues: Vec<Issue> = nodes
         .iter()
@@ -84,7 +131,7 @@ pub fn parse_list_response(body: &Value, limit: u32) -> Result<IssueListResult, 
         .map_err(|e| format!("Failed to parse issue: {e}"))?;
 
     let has_next_page = body
-        .pointer("/data/viewer/assignedIssues/pageInfo/hasNextPage")
+        .pointer("/data/issues/pageInfo/hasNextPage")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
@@ -312,10 +359,7 @@ fn format_debug_body(body: &str, pretty: bool) -> String {
             .map(|q| q.to_string());
 
         if query.is_some() {
-            parsed
-                .as_object_mut()
-                .unwrap()
-                .remove("query");
+            parsed.as_object_mut().unwrap().remove("query");
         }
 
         let mut out = String::new();
@@ -329,12 +373,17 @@ fn format_debug_body(body: &str, pretty: bool) -> String {
         // Print remaining fields (variables, etc.) if any exist.
         if let Some(obj) = parsed.as_object() {
             if !obj.is_empty() {
-                out.push_str(&serde_json::to_string_pretty(&parsed)
-                    .unwrap_or_else(|_| body.to_string()));
+                out.push_str(
+                    &serde_json::to_string_pretty(&parsed).unwrap_or_else(|_| body.to_string()),
+                );
             }
         }
 
-        if out.is_empty() { body.to_string() } else { out }
+        if out.is_empty() {
+            body.to_string()
+        } else {
+            out
+        }
     } else {
         body.to_string()
     }
@@ -446,10 +495,34 @@ mod tests {
     // ---- Query/mutation construction tests ----
 
     #[test]
-    fn build_list_query_includes_limit() {
-        let req = build_list_query(10);
-        assert!(req.query.contains("first: 10"));
-        assert!(req.variables.is_none());
+    fn build_list_query_no_filters() {
+        let req = build_list_query(10, &IssueFilters::default());
+        assert!(req.query.contains("issues(first: $first"));
+        let vars = req.variables.unwrap();
+        assert_eq!(vars["first"], 10);
+        assert!(vars["filter"].is_null());
+    }
+
+    #[test]
+    fn build_list_query_with_filters() {
+        let filters = IssueFilters {
+            assignee_id: Some("user-1".to_string()),
+            team_key: Some("ENG".to_string()),
+            state_name: Some("In Progress".to_string()),
+        };
+        let req = build_list_query(5, &filters);
+        let vars = req.variables.unwrap();
+        assert_eq!(vars["first"], 5);
+        assert_eq!(vars["filter"]["assignee"]["id"]["eq"], "user-1");
+        assert_eq!(vars["filter"]["team"]["key"]["eq"], "ENG");
+        assert_eq!(vars["filter"]["state"]["name"]["eq"], "In Progress");
+    }
+
+    #[test]
+    fn build_viewer_id_query_structure() {
+        let req = build_viewer_id_query();
+        assert!(req.query.contains("viewer"));
+        assert!(req.query.contains("id"));
     }
 
     #[test]
@@ -494,21 +567,19 @@ mod tests {
     fn parse_list_response_extracts_issues() {
         let body = serde_json::json!({
             "data": {
-                "viewer": {
-                    "assignedIssues": {
-                        "nodes": [
-                            {
-                                "id": "uuid-1",
-                                "identifier": "PROJ-1",
-                                "title": "First issue",
-                                "state": { "name": "In Progress" },
-                                "priority": 2.0,
-                                "description": "Desc",
-                                "url": "https://linear.app/proj/issue/PROJ-1"
-                            }
-                        ],
-                        "pageInfo": { "hasNextPage": false }
-                    }
+                "issues": {
+                    "nodes": [
+                        {
+                            "id": "uuid-1",
+                            "identifier": "PROJ-1",
+                            "title": "First issue",
+                            "state": { "name": "In Progress" },
+                            "priority": 2.0,
+                            "description": "Desc",
+                            "url": "https://linear.app/proj/issue/PROJ-1"
+                        }
+                    ],
+                    "pageInfo": { "hasNextPage": false }
                 }
             }
         });
@@ -522,17 +593,23 @@ mod tests {
     fn parse_list_response_truncation_message() {
         let body = serde_json::json!({
             "data": {
-                "viewer": {
-                    "assignedIssues": {
-                        "nodes": [],
-                        "pageInfo": { "hasNextPage": true }
-                    }
+                "issues": {
+                    "nodes": [],
+                    "pageInfo": { "hasNextPage": true }
                 }
             }
         });
         let result = parse_list_response(&body, 25).unwrap();
         assert!(result.message.is_some());
         assert!(result.message.unwrap().contains("truncated"));
+    }
+
+    #[test]
+    fn parse_viewer_id_extracts_id() {
+        let body = serde_json::json!({
+            "data": { "viewer": { "id": "user-123" } }
+        });
+        assert_eq!(parse_viewer_id(&body).unwrap(), "user-123");
     }
 
     #[test]
