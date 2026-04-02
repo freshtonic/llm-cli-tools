@@ -1,6 +1,6 @@
 [package]
 name = "llm-cli"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "A CLI tool for dispatching to llm-cli-* subcommands - designed to be used by AI agents"
 license = "MIT"
