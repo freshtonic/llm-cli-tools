@@ -124,8 +124,12 @@ impl Client {
         self.debug.as_ref().is_some_and(|d| d.pretty)
     }
 
-    fn is_curl_cmd(&self) -> bool {
-        self.debug.as_ref().is_some_and(|d| d.curl_cmd)
+    fn is_curl(&self) -> bool {
+        self.debug.as_ref().is_some_and(|d| d.curl)
+    }
+
+    fn is_dangerous_no_redact(&self) -> bool {
+        self.debug.as_ref().is_some_and(|d| d.dangerous_no_redact)
     }
 
     fn log_response(&self, response: &mut ureq::http::Response<ureq::Body>) -> String {
@@ -161,7 +165,7 @@ impl Client {
             serde_json::to_string(body).map_err(|e| format!("Serialization error: {e}"))?;
 
         if self.is_debug() {
-            let auth_display = if self.is_curl_cmd() {
+            let auth_display = if self.is_dangerous_no_redact() {
                 format!("Bearer {}", self.token)
             } else {
                 "Bearer <redacted>".to_string()
@@ -171,10 +175,15 @@ impl Client {
             eprintln!(">>> Content-Type: application/json; charset=utf-8");
             eprintln!(">>> ");
             eprintln!(">>> {}", self.format_body(&body_str));
-            if self.is_curl_cmd() {
+            if self.is_curl() {
+                let curl_auth = if self.is_dangerous_no_redact() {
+                    format!("Bearer {}", self.token)
+                } else {
+                    "Bearer <redacted>".to_string()
+                };
                 eprintln!(">>> ");
                 eprintln!(">>> curl -X POST '{url}' \\");
-                eprintln!(">>>   -H 'Authorization: Bearer {}' \\", self.token);
+                eprintln!(">>>   -H 'Authorization: {curl_auth}' \\");
                 eprintln!(">>>   -H 'Content-Type: application/json; charset=utf-8' \\");
                 eprintln!(">>>   -d '{body_str}'");
             }
@@ -248,17 +257,22 @@ impl Client {
         }
 
         if self.is_debug() {
-            let auth_display = if self.is_curl_cmd() {
+            let auth_display = if self.is_dangerous_no_redact() {
                 format!("Bearer {}", self.token)
             } else {
                 "Bearer <redacted>".to_string()
             };
             eprintln!(">>> GET {url}");
             eprintln!(">>> Authorization: {auth_display}");
-            if self.is_curl_cmd() {
+            if self.is_curl() {
+                let curl_auth = if self.is_dangerous_no_redact() {
+                    format!("Bearer {}", self.token)
+                } else {
+                    "Bearer <redacted>".to_string()
+                };
                 eprintln!(">>> ");
                 eprintln!(">>> curl '{url}' \\");
-                eprintln!(">>>   -H 'Authorization: Bearer {}'", self.token);
+                eprintln!(">>>   -H 'Authorization: {curl_auth}'");
             }
             eprintln!();
         }

@@ -32,7 +32,7 @@ Each API crate follows the same module structure:
 - **Edition 2024**, Rust stable
 - **JSON to stdout**, diagnostics/debug to stderr
 - **`--human` flag** for human-readable output on all API crates
-- **`--debug` flag** with comma-separated modes: `compact`, `pretty`, `curl_cmd`
+- **`--debug` flag** with comma-separated modes: `compact`, `pretty`, `curl`, `dangerous_no_redact`
 - **`ureq` v3** with `http_status_as_error(false)` — we handle HTTP status ourselves to enable response logging
 - **No async** — blocking HTTP, single-threaded, short-lived processes
 - **No shared library crate** — duplication across crates is acceptable at this scale

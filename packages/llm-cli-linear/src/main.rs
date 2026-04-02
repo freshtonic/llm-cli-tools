@@ -243,7 +243,7 @@ fn run(args: cli::Cli) -> Result<(), output::CliError> {
             detail: output::ErrorDetail {
                 code: "INVALID_DEBUG_MODE",
                 message: e,
-                suggestion: "Valid modes: compact, pretty, curl_cmd".to_string(),
+                suggestion: "Valid modes: compact, pretty, curl, dangerous_no_redact".to_string(),
             },
             human,
         })?;

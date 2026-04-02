@@ -486,10 +486,11 @@ pub fn execute(
     let url = format!("{api_url}/graphql");
     let body = serde_json::to_string(request).map_err(|e| format!("Serialization error: {e}"))?;
     let pretty = debug.is_some_and(|d| d.pretty);
-    let curl_cmd = debug.is_some_and(|d| d.curl_cmd);
+    let curl = debug.is_some_and(|d| d.curl);
+    let dangerous_no_redact = debug.is_some_and(|d| d.dangerous_no_redact);
 
     if debug.is_some() {
-        let auth_display = if curl_cmd {
+        let auth_display = if dangerous_no_redact {
             api_key.to_string()
         } else {
             "<redacted>".to_string()
@@ -499,10 +500,15 @@ pub fn execute(
         eprintln!(">>> Content-Type: application/json");
         eprintln!(">>> ");
         eprintln!(">>> {}", format_debug_body(&body, pretty));
-        if curl_cmd {
+        if curl {
+            let curl_auth = if dangerous_no_redact {
+                api_key.to_string()
+            } else {
+                "<redacted>".to_string()
+            };
             eprintln!(">>> ");
             eprintln!(">>> curl -X POST '{url}' \\");
-            eprintln!(">>>   -H 'Authorization: {api_key}' \\");
+            eprintln!(">>>   -H 'Authorization: {curl_auth}' \\");
             eprintln!(">>>   -H 'Content-Type: application/json' \\");
             eprintln!(">>>   -d '{body}'");
         }

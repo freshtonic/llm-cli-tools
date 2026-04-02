@@ -116,8 +116,10 @@ Re-run after installing new subcommands to pick up their completions.
 - `--human` — human-readable output instead of JSON
 - `--debug` — log HTTP requests/responses to stderr
 - `--debug=pretty` — pretty-print JSON bodies and GraphQL queries
-- `--debug=curl_cmd` — print reproducible curl commands (skips confirmation prompt when stdin is not a TTY)
-- `--debug=pretty,curl_cmd` — both
+- `--debug=curl` — print reproducible curl commands (secrets redacted by default)
+- `--debug=dangerous_no_redact` — show secrets in debug output
+- `--debug=curl,dangerous_no_redact` — curl commands with secrets exposed
+- `--debug=pretty,curl` — pretty + curl, secrets redacted
 
 ## JSON output format
 

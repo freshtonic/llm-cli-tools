@@ -10,49 +10,31 @@ use clap_complete::Shell;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DebugConfig {
     pub pretty: bool,
-    pub curl_cmd: bool,
+    pub curl: bool,
+    pub dangerous_no_redact: bool,
 }
 
 impl DebugConfig {
     pub fn parse(s: &str) -> Result<Self, String> {
         let mut config = DebugConfig {
             pretty: false,
-            curl_cmd: false,
+            curl: false,
+            dangerous_no_redact: false,
         };
         for flag in s.split(',') {
             match flag.trim() {
                 "compact" => {}
                 "pretty" => config.pretty = true,
-                "curl_cmd" => config.curl_cmd = true,
+                "curl" => config.curl = true,
+                "dangerous_no_redact" => config.dangerous_no_redact = true,
                 other => {
                     return Err(format!(
-                        "unknown debug mode: '{other}'. Valid modes: compact, pretty, curl_cmd"
+                        "unknown debug mode: '{other}'. Valid modes: compact, pretty, curl, dangerous_no_redact"
                     ));
                 }
             }
         }
-        config.confirm_curl_cmd()?;
         Ok(config)
-    }
-
-    fn confirm_curl_cmd(&self) -> Result<(), String> {
-        if !self.curl_cmd {
-            return Ok(());
-        }
-        // Skip confirmation when stdin is not a TTY (e.g., invoked by an agent).
-        let is_tty = unsafe { libc::isatty(libc::STDIN_FILENO) != 0 };
-        if !is_tty {
-            return Ok(());
-        }
-        eprint!("WARNING: curl_cmd mode will print secrets (API keys) to stderr. Continue? [y/N] ");
-        let mut input = String::new();
-        std::io::stdin()
-            .read_line(&mut input)
-            .map_err(|e| format!("Failed to read input: {e}"))?;
-        if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
-            return Err("Aborted.".to_string());
-        }
-        Ok(())
     }
 }
 
@@ -70,8 +52,8 @@ pub struct Cli {
     pub human: bool,
 
     /// Print raw HTTP requests and responses to stderr.
-    /// Comma-separated modes: compact (default), pretty, curl_cmd.
-    /// Examples: --debug, --debug=pretty, --debug=pretty,curl_cmd
+    /// Comma-separated modes: compact (default), pretty, curl, dangerous_no_redact.
+    /// Examples: --debug, --debug=pretty, --debug=curl,dangerous_no_redact
     #[arg(long, global = true, default_missing_value = "compact", num_args = 0..=1, require_equals = true)]
     pub debug: Option<String>,
 
@@ -479,5 +461,68 @@ mod tests {
     #[test]
     fn no_subcommand_shows_error() {
         assert!(parse_args(&[]).is_err());
+    }
+
+    // ---- DebugConfig parsing tests ----
+
+    #[test]
+    fn debug_config_compact() {
+        let config = DebugConfig::parse("compact").unwrap();
+        assert!(!config.pretty);
+        assert!(!config.curl);
+        assert!(!config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_pretty() {
+        let config = DebugConfig::parse("pretty").unwrap();
+        assert!(config.pretty);
+        assert!(!config.curl);
+        assert!(!config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_curl() {
+        let config = DebugConfig::parse("curl").unwrap();
+        assert!(!config.pretty);
+        assert!(config.curl);
+        assert!(!config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_dangerous_no_redact() {
+        let config = DebugConfig::parse("dangerous_no_redact").unwrap();
+        assert!(!config.pretty);
+        assert!(!config.curl);
+        assert!(config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_curl_and_dangerous_no_redact() {
+        let config = DebugConfig::parse("curl,dangerous_no_redact").unwrap();
+        assert!(!config.pretty);
+        assert!(config.curl);
+        assert!(config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_all_modes() {
+        let config = DebugConfig::parse("pretty,curl,dangerous_no_redact").unwrap();
+        assert!(config.pretty);
+        assert!(config.curl);
+        assert!(config.dangerous_no_redact);
+    }
+
+    #[test]
+    fn debug_config_unknown_mode() {
+        let err = DebugConfig::parse("invalid").unwrap_err();
+        assert!(err.contains("unknown debug mode"));
+        assert!(err.contains("invalid"));
+    }
+
+    #[test]
+    fn debug_config_rejects_old_curl_cmd() {
+        let err = DebugConfig::parse("curl_cmd").unwrap_err();
+        assert!(err.contains("unknown debug mode"));
     }
 }

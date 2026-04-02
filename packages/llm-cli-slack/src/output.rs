@@ -562,7 +562,7 @@ mod tests {
             detail: ErrorDetail {
                 code: "INVALID_DEBUG_MODE",
                 message: "Bad debug mode".into(),
-                suggestion: "Use compact, pretty, or curl_cmd".into(),
+                suggestion: "Use compact, pretty, curl, or dangerous_no_redact".into(),
             },
             human: false,
         };

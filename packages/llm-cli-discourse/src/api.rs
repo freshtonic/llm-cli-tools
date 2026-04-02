@@ -96,8 +96,12 @@ impl Client {
         self.debug.as_ref().is_some_and(|d| d.pretty)
     }
 
-    fn is_curl_cmd(&self) -> bool {
-        self.debug.as_ref().is_some_and(|d| d.curl_cmd)
+    fn is_curl(&self) -> bool {
+        self.debug.as_ref().is_some_and(|d| d.curl)
+    }
+
+    fn is_dangerous_no_redact(&self) -> bool {
+        self.debug.as_ref().is_some_and(|d| d.dangerous_no_redact)
     }
 
     fn format_body(&self, body: &str) -> String {
@@ -121,7 +125,7 @@ impl Client {
 
     fn debug_request(&self, method: &str, url: &str, body: Option<&str>) {
         if self.is_debug() {
-            let key_display = if self.is_curl_cmd() {
+            let key_display = if self.is_dangerous_no_redact() {
                 self.api_key.as_str()
             } else {
                 "<redacted>"
@@ -134,10 +138,15 @@ impl Client {
                 eprintln!(">>> ");
                 eprintln!(">>> {}", self.format_body(b));
             }
-            if self.is_curl_cmd() {
+            if self.is_curl() {
+                let curl_key = if self.is_dangerous_no_redact() {
+                    self.api_key.as_str()
+                } else {
+                    "<redacted>"
+                };
                 eprintln!(">>> ");
                 let mut curl = format!(">>> curl -X {method} '{url}'");
-                curl.push_str(&format!(" \\\n>>>   -H 'Api-Key: {}'", self.api_key));
+                curl.push_str(&format!(" \\\n>>>   -H 'Api-Key: {curl_key}'"));
                 curl.push_str(&format!(
                     " \\\n>>>   -H 'Api-Username: {}'",
                     self.api_username
