@@ -173,17 +173,46 @@ impl Client {
         let url = format!("{}{path}", self.base_url);
         self.debug_request("GET", &url, None);
 
-        let mut response = self
-            .agent()
-            .get(&url)
-            .header("Api-Key", &self.api_key)
-            .header("Api-Username", &self.api_username)
-            .header("Accept", "application/json")
-            .call()
-            .map_err(|e| self.debug_error(&e))?;
+        let mut attempt = 0;
+        let (status, text) = loop {
+            attempt += 1;
+            let result = self
+                .agent()
+                .get(&url)
+                .header("Api-Key", &self.api_key)
+                .header("Api-Username", &self.api_username)
+                .header("Accept", "application/json")
+                .call();
 
-        let status = response.status();
-        let text = self.log_response(&mut response);
+            match result {
+                Ok(mut resp) => {
+                    let st = resp.status();
+                    let t = self.log_response(&mut resp);
+
+                    if attempt == 1 && is_retryable_status(st.as_u16()) {
+                        if self.is_debug() {
+                            eprintln!(">>> Retrying after 1s (HTTP {st})...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    break (st, t);
+                }
+                Err(e) => {
+                    if attempt == 1 {
+                        if self.is_debug() {
+                            eprintln!("<<< ERROR: {e}");
+                            eprintln!(">>> Retrying after 1s (network error)...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    return Err(self.debug_error(&e));
+                }
+            }
+        };
 
         if status.as_u16() >= 400 {
             return Err(format!("HTTP {status}: {}", &text[..text.len().min(500)]));
@@ -198,18 +227,47 @@ impl Client {
 
         self.debug_request("POST", &url, Some(&body_str));
 
-        let mut response = self
-            .agent()
-            .post(&url)
-            .header("Api-Key", &self.api_key)
-            .header("Api-Username", &self.api_username)
-            .header("Content-Type", "application/json")
-            .header("Accept", "application/json")
-            .send(&body_str)
-            .map_err(|e| self.debug_error(&e))?;
+        let mut attempt = 0;
+        let (status, text) = loop {
+            attempt += 1;
+            let result = self
+                .agent()
+                .post(&url)
+                .header("Api-Key", &self.api_key)
+                .header("Api-Username", &self.api_username)
+                .header("Content-Type", "application/json")
+                .header("Accept", "application/json")
+                .send(&body_str);
 
-        let status = response.status();
-        let text = self.log_response(&mut response);
+            match result {
+                Ok(mut resp) => {
+                    let st = resp.status();
+                    let t = self.log_response(&mut resp);
+
+                    if attempt == 1 && is_retryable_status(st.as_u16()) {
+                        if self.is_debug() {
+                            eprintln!(">>> Retrying after 1s (HTTP {st})...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    break (st, t);
+                }
+                Err(e) => {
+                    if attempt == 1 {
+                        if self.is_debug() {
+                            eprintln!("<<< ERROR: {e}");
+                            eprintln!(">>> Retrying after 1s (network error)...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    return Err(self.debug_error(&e));
+                }
+            }
+        };
 
         if status.as_u16() >= 400 {
             return Err(format!("HTTP {status}: {}", &text[..text.len().min(500)]));
@@ -303,6 +361,11 @@ impl Client {
         let body = self.get("/categories.json")?;
         parse_category_id(&body, name)
     }
+}
+
+/// Whether an HTTP status code is retryable (429 or 5xx).
+fn is_retryable_status(status: u16) -> bool {
+    status == 429 || status >= 500
 }
 
 /// Parse the latest posts response from `GET /posts.json`.
@@ -568,6 +631,48 @@ mod tests {
     fn parse_category_id_missing_categories() {
         let body = serde_json::json!({});
         assert!(parse_category_id(&body, "General").is_err());
+    }
+
+    // ---- Retry helper tests ----
+
+    #[test]
+    fn is_retryable_status_429() {
+        assert!(is_retryable_status(429));
+    }
+
+    #[test]
+    fn is_retryable_status_500() {
+        assert!(is_retryable_status(500));
+    }
+
+    #[test]
+    fn is_retryable_status_502() {
+        assert!(is_retryable_status(502));
+    }
+
+    #[test]
+    fn is_retryable_status_503() {
+        assert!(is_retryable_status(503));
+    }
+
+    #[test]
+    fn is_retryable_status_200_not_retryable() {
+        assert!(!is_retryable_status(200));
+    }
+
+    #[test]
+    fn is_retryable_status_400_not_retryable() {
+        assert!(!is_retryable_status(400));
+    }
+
+    #[test]
+    fn is_retryable_status_404_not_retryable() {
+        assert!(!is_retryable_status(404));
+    }
+
+    #[test]
+    fn is_retryable_status_499_not_retryable() {
+        assert!(!is_retryable_status(499));
     }
 
     // ---- Pagination tests ----

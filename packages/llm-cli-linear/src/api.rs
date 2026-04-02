@@ -88,14 +88,12 @@ pub struct IssueFilters {
     pub assignee_id: Option<String>,
     pub team_key: Option<String>,
     pub state_name: Option<String>,
+    pub priority: Option<u8>,
+    pub label_name: Option<String>,
 }
 
 /// Build the GraphQL query for listing issues with optional filters and cursor.
-pub fn build_list_query(
-    limit: u32,
-    filters: &IssueFilters,
-    after: Option<&str>,
-) -> GraphqlRequest {
+pub fn build_list_query(limit: u32, filters: &IssueFilters, after: Option<&str>) -> GraphqlRequest {
     let query = r#"query($first: Int!, $filter: IssueFilter, $after: String) {
   issues(first: $first, filter: $filter, after: $after) {
     nodes {
@@ -137,6 +135,18 @@ pub fn build_list_query(
         filter.insert(
             "state".to_string(),
             serde_json::json!({ "name": { "eq": name } }),
+        );
+    }
+    if let Some(priority) = filters.priority {
+        filter.insert(
+            "priority".to_string(),
+            serde_json::json!({ "eq": priority }),
+        );
+    }
+    if let Some(ref label_name) = filters.label_name {
+        filter.insert(
+            "labels".to_string(),
+            serde_json::json!({ "some": { "name": { "eq": label_name } } }),
         );
     }
 
@@ -418,6 +428,11 @@ pub fn parse_done_state_id(body: &Value) -> Result<(String, String), String> {
     Ok((issue_id, done_state_id))
 }
 
+/// Whether an HTTP status code is retryable (429 or 5xx).
+fn is_retryable_status(status: u16) -> bool {
+    status == 429 || status >= 500
+}
+
 /// Format a body string for debug output, optionally pretty-printing.
 fn format_debug_body(body: &str, pretty: bool) -> String {
     if !pretty {
@@ -499,41 +514,63 @@ pub fn execute(
             .http_status_as_error(false)
             .build(),
     );
-    let mut response = match agent
-        .post(&url)
-        .header("Authorization", &api_key.to_string())
-        .header("Content-Type", "application/json")
-        .send(&body)
-    {
-        Ok(resp) => resp,
-        Err(e) => {
-            if debug.is_some() {
-                eprintln!("<<< ERROR: {e}");
-                eprintln!();
+
+    // Attempt the request, retrying once on transient errors.
+    let mut attempt = 0;
+    let (status, response_text) = loop {
+        attempt += 1;
+        let result = agent
+            .post(&url)
+            .header("Authorization", &api_key.to_string())
+            .header("Content-Type", "application/json")
+            .send(&body);
+
+        match result {
+            Ok(mut resp) => {
+                let st = resp.status();
+                if debug.is_some() {
+                    eprintln!("<<< {st}");
+                    for (name, value) in resp.headers() {
+                        eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
+                    }
+                }
+                let text = resp
+                    .body_mut()
+                    .read_to_string()
+                    .map_err(|e| format!("Failed to read response: {e}"))?;
+                if debug.is_some() {
+                    eprintln!("<<<");
+                    eprintln!("<<< {}", format_debug_body(&text, pretty));
+                    eprintln!();
+                }
+
+                if attempt == 1 && is_retryable_status(st.as_u16()) {
+                    if debug.is_some() {
+                        eprintln!(">>> Retrying after 1s (HTTP {st})...");
+                        eprintln!();
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    continue;
+                }
+                break (st, text);
             }
-            return Err(format!("HTTP request failed: {e}"));
+            Err(e) => {
+                if debug.is_some() {
+                    eprintln!("<<< ERROR: {e}");
+                    eprintln!();
+                }
+                if attempt == 1 {
+                    if debug.is_some() {
+                        eprintln!(">>> Retrying after 1s (network error)...");
+                        eprintln!();
+                    }
+                    std::thread::sleep(std::time::Duration::from_secs(1));
+                    continue;
+                }
+                return Err(format!("HTTP request failed: {e}"));
+            }
         }
     };
-
-    let status = response.status();
-
-    if debug.is_some() {
-        eprintln!("<<< {status}");
-        for (name, value) in response.headers() {
-            eprintln!("<<<   {}: {}", name, value.to_str().unwrap_or("<binary>"));
-        }
-    }
-
-    let response_text = response
-        .body_mut()
-        .read_to_string()
-        .map_err(|e| format!("Failed to read response: {e}"))?;
-
-    if debug.is_some() {
-        eprintln!("<<<");
-        eprintln!("<<< {}", format_debug_body(&response_text, pretty));
-        eprintln!();
-    }
 
     // Check HTTP status after logging.
     if status.as_u16() >= 400 {
@@ -581,6 +618,7 @@ mod tests {
             assignee_id: Some("user-1".to_string()),
             team_key: Some("ENG".to_string()),
             state_name: Some("In Progress".to_string()),
+            ..Default::default()
         };
         let req = build_list_query(5, &filters, None);
         let vars = req.variables.unwrap();
@@ -588,6 +626,46 @@ mod tests {
         assert_eq!(vars["filter"]["assignee"]["id"]["eq"], "user-1");
         assert_eq!(vars["filter"]["team"]["key"]["eq"], "ENG");
         assert_eq!(vars["filter"]["state"]["name"]["eq"], "In Progress");
+    }
+
+    #[test]
+    fn build_list_query_with_priority_filter() {
+        let filters = IssueFilters {
+            priority: Some(2),
+            ..Default::default()
+        };
+        let req = build_list_query(10, &filters, None);
+        let vars = req.variables.unwrap();
+        assert_eq!(vars["filter"]["priority"]["eq"], 2);
+    }
+
+    #[test]
+    fn build_list_query_with_label_filter() {
+        let filters = IssueFilters {
+            label_name: Some("bug".to_string()),
+            ..Default::default()
+        };
+        let req = build_list_query(10, &filters, None);
+        let vars = req.variables.unwrap();
+        assert_eq!(vars["filter"]["labels"]["some"]["name"]["eq"], "bug");
+    }
+
+    #[test]
+    fn build_list_query_with_all_filters() {
+        let filters = IssueFilters {
+            assignee_id: Some("user-1".to_string()),
+            team_key: Some("ENG".to_string()),
+            state_name: Some("In Progress".to_string()),
+            priority: Some(1),
+            label_name: Some("urgent".to_string()),
+        };
+        let req = build_list_query(5, &filters, None);
+        let vars = req.variables.unwrap();
+        assert_eq!(vars["filter"]["assignee"]["id"]["eq"], "user-1");
+        assert_eq!(vars["filter"]["team"]["key"]["eq"], "ENG");
+        assert_eq!(vars["filter"]["state"]["name"]["eq"], "In Progress");
+        assert_eq!(vars["filter"]["priority"]["eq"], 1);
+        assert_eq!(vars["filter"]["labels"]["some"]["name"]["eq"], "urgent");
     }
 
     #[test]
@@ -1015,8 +1093,14 @@ mod tests {
             "updatedAt": "2026-03-02T00:00:00Z"
         });
         let from_camel: Issue = serde_json::from_value(camel_json).unwrap();
-        assert_eq!(from_camel.created_at.as_deref(), Some("2026-03-01T00:00:00Z"));
-        assert_eq!(from_camel.updated_at.as_deref(), Some("2026-03-02T00:00:00Z"));
+        assert_eq!(
+            from_camel.created_at.as_deref(),
+            Some("2026-03-01T00:00:00Z")
+        );
+        assert_eq!(
+            from_camel.updated_at.as_deref(),
+            Some("2026-03-02T00:00:00Z")
+        );
     }
 
     #[test]
@@ -1057,5 +1141,47 @@ mod tests {
         assert!(req.query.contains("labels { nodes { name } }"));
         assert!(req.query.contains("createdAt"));
         assert!(req.query.contains("updatedAt"));
+    }
+
+    // ---- Retry helper tests ----
+
+    #[test]
+    fn is_retryable_status_429() {
+        assert!(is_retryable_status(429));
+    }
+
+    #[test]
+    fn is_retryable_status_500() {
+        assert!(is_retryable_status(500));
+    }
+
+    #[test]
+    fn is_retryable_status_502() {
+        assert!(is_retryable_status(502));
+    }
+
+    #[test]
+    fn is_retryable_status_503() {
+        assert!(is_retryable_status(503));
+    }
+
+    #[test]
+    fn is_retryable_status_200_not_retryable() {
+        assert!(!is_retryable_status(200));
+    }
+
+    #[test]
+    fn is_retryable_status_400_not_retryable() {
+        assert!(!is_retryable_status(400));
+    }
+
+    #[test]
+    fn is_retryable_status_404_not_retryable() {
+        assert!(!is_retryable_status(404));
+    }
+
+    #[test]
+    fn is_retryable_status_499_not_retryable() {
+        assert!(!is_retryable_status(499));
     }
 }

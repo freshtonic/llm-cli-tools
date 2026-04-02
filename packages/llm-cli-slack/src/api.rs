@@ -181,16 +181,51 @@ impl Client {
             eprintln!();
         }
 
-        let mut response = self
-            .agent()
-            .post(&url)
-            .header("Authorization", &format!("Bearer {}", self.token))
-            .header("Content-Type", "application/json; charset=utf-8")
-            .send(&body_str)
-            .map_err(|e| self.debug_error(&e))?;
+        let mut attempt = 0;
+        let (status, text) = loop {
+            attempt += 1;
+            let result = self
+                .agent()
+                .post(&url)
+                .header("Authorization", &format!("Bearer {}", self.token))
+                .header("Content-Type", "application/json; charset=utf-8")
+                .send(&body_str);
 
-        let status = response.status();
-        let text = self.log_response(&mut response);
+            match result {
+                Ok(mut resp) => {
+                    let st = resp.status();
+                    let retry_after = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(parse_retry_after_seconds);
+                    let t = self.log_response(&mut resp);
+
+                    if attempt == 1 && is_retryable_status(st.as_u16()) {
+                        let delay = retry_after.unwrap_or(1);
+                        if self.is_debug() {
+                            eprintln!(">>> Retrying after {delay}s (HTTP {st})...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(delay));
+                        continue;
+                    }
+                    break (st, t);
+                }
+                Err(e) => {
+                    if attempt == 1 {
+                        if self.is_debug() {
+                            eprintln!("<<< ERROR: {e}");
+                            eprintln!(">>> Retrying after 1s (network error)...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    return Err(self.debug_error(&e));
+                }
+            }
+        };
 
         if status.as_u16() >= 400 {
             return Err(format!("HTTP {status}: {}", &text[..text.len().min(500)]));
@@ -228,15 +263,50 @@ impl Client {
             eprintln!();
         }
 
-        let mut response = self
-            .agent()
-            .get(&url)
-            .header("Authorization", &format!("Bearer {}", self.token))
-            .call()
-            .map_err(|e| self.debug_error(&e))?;
+        let mut attempt = 0;
+        let (status, text) = loop {
+            attempt += 1;
+            let result = self
+                .agent()
+                .get(&url)
+                .header("Authorization", &format!("Bearer {}", self.token))
+                .call();
 
-        let status = response.status();
-        let text = self.log_response(&mut response);
+            match result {
+                Ok(mut resp) => {
+                    let st = resp.status();
+                    let retry_after = resp
+                        .headers()
+                        .get("retry-after")
+                        .and_then(|v| v.to_str().ok())
+                        .and_then(parse_retry_after_seconds);
+                    let t = self.log_response(&mut resp);
+
+                    if attempt == 1 && is_retryable_status(st.as_u16()) {
+                        let delay = retry_after.unwrap_or(1);
+                        if self.is_debug() {
+                            eprintln!(">>> Retrying after {delay}s (HTTP {st})...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(delay));
+                        continue;
+                    }
+                    break (st, t);
+                }
+                Err(e) => {
+                    if attempt == 1 {
+                        if self.is_debug() {
+                            eprintln!("<<< ERROR: {e}");
+                            eprintln!(">>> Retrying after 1s (network error)...");
+                            eprintln!();
+                        }
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        continue;
+                    }
+                    return Err(self.debug_error(&e));
+                }
+            }
+        };
 
         if status.as_u16() >= 400 {
             return Err(format!("HTTP {status}: {}", &text[..text.len().min(500)]));
@@ -274,12 +344,20 @@ impl Client {
         channel: &str,
         limit: u32,
         cursor: Option<&str>,
+        oldest: Option<&str>,
+        latest: Option<&str>,
     ) -> Result<HistoryResult, String> {
         let limit_str = limit.to_string();
         let cursor_str = cursor.unwrap_or_default().to_string();
         let mut params = vec![("channel", channel), ("limit", &limit_str)];
         if cursor.is_some() {
             params.push(("cursor", &cursor_str));
+        }
+        if let Some(oldest) = oldest {
+            params.push(("oldest", oldest));
+        }
+        if let Some(latest) = latest {
+            params.push(("latest", latest));
         }
         let response = self.get("conversations.history", &params)?;
         parse_history_response(&response, limit)
@@ -336,6 +414,18 @@ impl Client {
         let response = self.post("conversations.requestSummarize", &body)?;
         parse_summary_response(&response)
     }
+}
+
+/// Whether an HTTP status code is retryable (429 or 5xx).
+fn is_retryable_status(status: u16) -> bool {
+    status == 429 || status >= 500
+}
+
+/// Parse a Retry-After header value as seconds, capping at 30s.
+/// Returns None if the value is not a valid integer.
+/// Values of 0 are treated as 1 second (minimum backoff).
+fn parse_retry_after_seconds(value: &str) -> Option<u64> {
+    value.parse::<u64>().ok().map(|s| s.clamp(1, 30))
 }
 
 /// Check the Slack API `ok` field and extract error details.
@@ -710,5 +800,67 @@ mod tests {
         let msg: SearchMessage = serde_json::from_value(json).unwrap();
         assert!(msg.reply_count.is_none());
         assert!(msg.reactions.is_none());
+    }
+
+    // ---- Retry helper tests ----
+
+    #[test]
+    fn is_retryable_status_429() {
+        assert!(is_retryable_status(429));
+    }
+
+    #[test]
+    fn is_retryable_status_500() {
+        assert!(is_retryable_status(500));
+    }
+
+    #[test]
+    fn is_retryable_status_502() {
+        assert!(is_retryable_status(502));
+    }
+
+    #[test]
+    fn is_retryable_status_503() {
+        assert!(is_retryable_status(503));
+    }
+
+    #[test]
+    fn is_retryable_status_200_not_retryable() {
+        assert!(!is_retryable_status(200));
+    }
+
+    #[test]
+    fn is_retryable_status_400_not_retryable() {
+        assert!(!is_retryable_status(400));
+    }
+
+    #[test]
+    fn is_retryable_status_404_not_retryable() {
+        assert!(!is_retryable_status(404));
+    }
+
+    #[test]
+    fn is_retryable_status_499_not_retryable() {
+        assert!(!is_retryable_status(499));
+    }
+
+    #[test]
+    fn parse_retry_after_header_valid_seconds() {
+        assert_eq!(parse_retry_after_seconds("5"), Some(5));
+    }
+
+    #[test]
+    fn parse_retry_after_header_caps_at_30() {
+        assert_eq!(parse_retry_after_seconds("60"), Some(30));
+    }
+
+    #[test]
+    fn parse_retry_after_header_zero() {
+        assert_eq!(parse_retry_after_seconds("0"), Some(1));
+    }
+
+    #[test]
+    fn parse_retry_after_header_invalid() {
+        assert_eq!(parse_retry_after_seconds("not-a-number"), None);
     }
 }
